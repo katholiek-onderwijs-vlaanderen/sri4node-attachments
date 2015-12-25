@@ -1,7 +1,6 @@
 # sri4node-attachments
 Support module to easily add support for attachments (BLOBs) on SRI resources implemented with [sri4node](https://github.com/dimitrydhondt/sri4node).  
 Currently supports storing attachments in a local folder, or on Amazon S3. 
-In the future storage for smaller items in postgres may be added.
 
 ## Example
 
@@ -52,10 +51,11 @@ You can add custom middleware (one or an array of them) in the routes that are h
     
 ## Future
 
-Next we'll :
+Next :
 
 * Add a flexible way to support meta information on the attachemnts. 
 * Provide an sri4node `afterread` function to allow adding $$atachments listing available attachments. 
 * Provide an sri4node `afterdelete`function to make it easy to delete attachments when a resource is removed.
+* In the future storage for smaller items in postgres may be added.
 * ...
 
