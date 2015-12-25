@@ -14,7 +14,7 @@ Currently supports storing attachments in a local folder, or on Amazon S3.
       s3bucket: process.env.S3_BUCKET
     });
     //
-    // In you sri4node resource configuration
+    // In your sri4node resource configuration
     //
     ...
     customroutes: [
