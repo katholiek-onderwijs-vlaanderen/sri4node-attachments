@@ -1,5 +1,6 @@
 # sri4node-attachments
-Support module to easily add support for attachments (BLOBs) on SRI resources implemented with [sri4node](https://github.com/dimitrydhondt/sri4node).  
+Support module to easily add support for attachments (BLOBs) on [SRI](https://github.com/dimitrydhondt/sri) 
+resources implemented with [sri4node](https://github.com/dimitrydhondt/sri4node).  
 Currently supports storing attachments in a local folder, or on Amazon S3. 
 
 ## Example
