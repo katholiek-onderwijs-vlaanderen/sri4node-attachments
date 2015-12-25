@@ -34,7 +34,7 @@ Supports configuration options :
 * `s3secret` : Use this secret to connect to S3.
 * `s3bucket` : Store the attachments in this S3 bucket.
 * `s3region` : Connect to this S3 region. Default `eu-west-1`.
-* `folder` : If you want to store the attachements in a local folder specify an existing folder here.
+* `folder` : If you want to store the attachements in a local folder specify an *existing* folder here.
 * `tempFolder` : Must be a writable directory. Used for intermediate storage of uploaded attachments.
 * `maximumFilesizeInMB` : The maximum size for file uploads, in megabytes.
 
