@@ -1,0 +1,43 @@
+{
+  "name": "sri4node-attachments",
+  "version": "0.1.0",
+  "description": "A standard implementation to support attachments on sri4node resources.",
+  "main": "sri4node-attachments.js",
+  "scripts": {
+    "test": "env $(cat .env) mocha",
+    "test-dev": "env $(cat .env) mocha --debug-brk"
+    "createdb": "./createdb.sh",
+    "lint": "eslint sri4node-attachments.js js test",
+  },
+  "dependencies": {
+    "q": "^1.0.1",
+    "sri4node-client": "^1.0.0",
+    "array-unique": "0.2.1",
+    "uuid": "2.0.x"
+  },
+  "devDependencies": {
+    "express": "~4.9.x",
+    "pg": "2.x",
+    "mocha": "~2.2.4",
+    "node-uuid": "~1.4.3",
+    "eslint": "~1.4.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dimitrydhondt/sri4node-attachments.git"
+  },
+  "keywords": [
+    "SRI",
+    "REST",
+    "postgres",
+    "node",
+    "node.js",
+    "attachments"
+  ],
+  "author": "Dimitry D'hondt <dimitry.dhondt@yahoo.com> (https://github.com/dimitrydhondt/sri4node)",
+  "license": "LGPL-3.0",
+  "bugs": {
+    "url": "https://github.com/dimitrydhondt/sri4node-attachments/issues"
+  },
+  "homepage": "https://github.com/dimitrydhondt/sri4node-attachments"
+}
