@@ -26,8 +26,9 @@ Currently supports storing attachments in a local folder, or on Amazon S3.
 Next you can use `PUT` on `/people/{guid}/filename.jpg` to create and update attachments. 
 Any filename can be used. The attachement is associated with `/people/{guid}`
 And you can do `GET` on the same URL to retrieve your attachment.  
-  
-It supports these configuration options : 
+
+## Configuration
+Supports configuration options : 
 
 * `s3key` : Use this key to connect to S3.
 * `s3secret` : Use this secret to connect to S3.
@@ -39,7 +40,7 @@ It supports these configuration options :
 * `tempFolder` : Must be a writable directory. Used for intermediate storage of uploaded attachments.
 * `maximumFilesizeInMB` : The maximum size for file uploads, in megabytes.
 
-## Adding middleware
+### Adding custom middleware
 You can add custom middleware (one or an array of them) in the routes that are handling your attachments :
 
     ...
@@ -49,6 +50,8 @@ You can add custom middleware (one or an array of them) in the routes that are h
     ]
     ...
     
+You can use this to update for example a database table, or a JSONB column on the affected resource, etc..
+
 ## Future
 
 Next :
