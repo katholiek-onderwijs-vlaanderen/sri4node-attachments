@@ -54,7 +54,7 @@ You can use this to update for example a database table, or a JSONB column on th
 
 Next :
 
-* Add a flexible way to support meta information on the attachemnts. 
+* Add a flexible way to support meta information on the attachments. 
 * Provide an sri4node `afterread` function to allow adding $$atachments listing available attachments. 
 * Provide an sri4node `afterdelete`function to make it easy to delete attachments when a resource is removed.
 * In the future storage for smaller items in postgres may be added.
