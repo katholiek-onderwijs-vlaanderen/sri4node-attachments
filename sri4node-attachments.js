@@ -211,8 +211,8 @@ exports = module.exports = {
     return {
       customRouteForUpload: function (type, extraMiddleware) {
         var allMiddleware = [
-            multerAutoReap,
-            upload.any()
+          multerAutoReap,
+          upload.any()
         ];
         if (extraMiddleware) {
           allMiddleware = allMiddleware.concat(extraMiddleware);
