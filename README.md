@@ -28,8 +28,6 @@ Any filename can be used. The attachement is associated with `/people/{guid}`
 And you can do `GET` on the same URL to retrieve your attachment.  
 
 ## Configuration
-Supports configuration options : 
-
 * `s3key` : Use this key to connect to S3.
 * `s3secret` : Use this secret to connect to S3.
 * `s3bucket` : Store the attachments in this S3 bucket.
@@ -51,9 +49,6 @@ You can add custom middleware (one or an array of them) in the routes that are h
 You can use this to update for example a database table, or a JSONB column on the affected resource, etc..
 
 ## Future
-
-Next :
-
 * Add a flexible way to support meta information on the attachments. 
 * Provide an sri4node `afterread` function to allow adding $$atachments listing available attachments. 
 * Provide an sri4node `afterdelete`function to make it easy to delete attachments when a resource is removed.
