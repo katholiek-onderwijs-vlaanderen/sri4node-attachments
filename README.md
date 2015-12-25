@@ -8,7 +8,7 @@ Currently supports storing attachments in a local folder, or on Amazon S3.
     //
     var winston = require('winston'); // For logging.
     var sri4nodeAttachments = require('sri4node-attachements');
-    var attachements = sri4nodeAttachments.configure(winston, {
+    var attachments = sri4nodeAttachments.configure(winston, {
       s3key: process.env.S3_KEY,
       s3secret: process.env.S3_SECRET,
       s3bucket: process.env.S3_BUCKET
