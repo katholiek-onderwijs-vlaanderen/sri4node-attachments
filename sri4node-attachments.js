@@ -2,7 +2,6 @@ var s3 = require('s3');
 var Q = require('q');
 var qfs = require('q-io/fs');
 var fs = require('fs');
-var needle = require('needle');
 var multer = require('multer');
 var multerAutoReap = require('multer-autoreap');
 multerAutoReap.options.reapOnError = true;
@@ -167,7 +166,7 @@ exports = module.exports = {
           error(err);
           deferred.reject(msg);
         });
-        uploader.on('end', function (data) {
+        uploader.on('end', function () {
           debug('Upload of file [' + fromFilename + '] was successful.');
           deferred.resolve(ret);
         });
@@ -298,7 +297,7 @@ exports = module.exports = {
           }
           promises.push(qfs.copy(fromFilename, toFilename));
         }
-        Q.all(promises).then(function (results) {
+        Q.all(promises).then(function () {
           // Acknowledge to the client that the files were stored.
           res.sendStatus(statusCode);
           deferred.resolve();
@@ -396,6 +395,7 @@ exports = module.exports = {
           deferred.resolve();
         }).catch(function (err) {
           error('Unable to delete file [' + remoteFilename + ']');
+          error(err);
           res.sendStatus(500);
           deferred.resolve();
         });
