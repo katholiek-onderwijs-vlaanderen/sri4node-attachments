@@ -1,6 +1,6 @@
 {
   "name": "sri4node-attachments",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A standard implementation to support attachments on sri4node resources.",
   "main": "sri4node-attachments.js",
   "scripts": {
