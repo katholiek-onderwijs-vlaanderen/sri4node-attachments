@@ -173,7 +173,6 @@ exports = module.exports = {
       var fromFilename;
       var toFilename;
       var promises = [];
-      var stats;
 
       debug('handling file upload !');
       debug(req.files);
@@ -186,12 +185,15 @@ exports = module.exports = {
           promises.push(uploadToS3(s3client, fromFilename, toFilename));
         }
       } else {
+        if (path === '/tmp') {
+          warn('Storing files in /tmp. Only for testing purposes. DO NOT USE IN PRODUCTION !');
+        }
         for (i = 0; i < req.files.length; i++) {
           fromFilename = req.files[i].path;
           toFilename = path + '/' + req.params.key + '-' + req.params.filename;
           try {
-            stats = fs.lstatSync(toFilename);
-          } catch(err) {
+            fs.lstatSync(toFilename);
+          } catch (err) {
             if (err.code === 'ENOENT') {
               // At least one of the files did not exist -> return 201.
               statusCode = 201;
@@ -227,11 +229,14 @@ exports = module.exports = {
         remoteFilename = req.params.key + '-' + req.params.filename;
         downloadFromS3(s3client, res, remoteFilename);
       } else {
+        if (path === '/tmp') {
+          warn('Storing files in /tmp. Only for testing purposes. DO NOT USE IN PRODUCTION !');
+        }
         localFilename = path + '/' + req.params.key + '-' + req.params.filename;
         try {
           fs.lstatSync(localFilename);
           exists = true;
-        } catch(err) {
+        } catch (err) {
           if (err.code === 'ENOENT') {
             exists = false;
           } else {
@@ -264,11 +269,14 @@ exports = module.exports = {
         remoteFilename = req.params.key + '-' + req.params.filename;
         deleteFromS3(s3client, res, remoteFilename);
       } else {
+        if (path === '/tmp') {
+          warn('Storing files in /tmp. Only for testing purposes. DO NOT USE IN PRODUCTION !');
+        }
         localFilename = path + '/' + req.params.key + '-' + req.params.filename;
         try {
           fs.lstatSync(localFilename);
           exists = true;
-        } catch(err) {
+        } catch (err) {
           if (err.code === 'ENOENT') {
             exists = false;
           } else {
@@ -324,3 +332,8 @@ exports = module.exports = {
     };
   }
 };
+
+// TODO : Check idempotency of PUT and DELETE
+// TODO : Define resource with S3 and file storage to test both
+// TODO : When BLOB database storage is implemented, also add a resource on that with tests
+// TODO : Implement + check after & before function (with database access) on GET, PUT and DELETE.

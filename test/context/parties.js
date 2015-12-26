@@ -1,12 +1,12 @@
-var Q = require('q');
+//var Q = require('q');
 var sri4nodeAttachments = require('../../sri4node-attachments.js');
 
 exports = module.exports = function (sri4node, winston) {
   'use strict';
-  var $u = sri4node.utils,
-    $m = sri4node.mapUtils,
-    $s = sri4node.schemaUtils,
-    $q = sri4node.queryUtils;
+  //var $u = sri4node.utils;
+  var $m = sri4node.mapUtils;
+  var $s = sri4node.schemaUtils;
+  var $q = sri4node.queryUtils;
 /*
   function debug(x) {
     winston.log('debug', x);

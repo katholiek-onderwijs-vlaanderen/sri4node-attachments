@@ -1,6 +1,5 @@
 /* Configuration for sri4node, used for our server.js, but also for mocha tests */
 var Q = require('q');
-var fs = require('fs');
 var knownIdentities = {};
 var knownPasswords = {};
 
