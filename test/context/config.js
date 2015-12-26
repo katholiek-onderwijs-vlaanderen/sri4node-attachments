@@ -1,6 +1,6 @@
 /* Configuration for sri4node, used for our server.js, but also for mocha tests */
 var Q = require('q');
-var sri4nodeAttachments = require('../../sri4node-attachments.js');
+var sri4nodeAttachments = require('../../js/sri4node-attachments.js');
 
 var knownIdentities = {};
 var knownPasswords = {};
