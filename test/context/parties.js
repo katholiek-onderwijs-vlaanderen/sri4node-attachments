@@ -1,7 +1,6 @@
 //var Q = require('q');
-var sri4nodeAttachments = require('../../sri4node-attachments.js');
 
-exports = module.exports = function (sri4node, winston) {
+exports = module.exports = function (sri4node, winston, attachments, type) {
   'use strict';
   //var $u = sri4node.utils;
   var $m = sri4node.mapUtils;
@@ -12,17 +11,11 @@ exports = module.exports = function (sri4node, winston) {
     winston.log('debug', x);
   }
 */
-  var attachments = sri4nodeAttachments.configure(winston, {
-    s3key: process.env.S3_KEY, // eslint-disable-line
-    s3secret: process.env.S3_SECRET, // eslint-disable-line
-    s3bucket: process.env.S3_BUCKET, // eslint-disable-line
-    folder: '/tmp/inner-gerbil'
-  });
-
   var ret = {
     // Base url, maps 1:1 with a table in postgres
     // Same name, except the '/' is removed
-    type: '/parties',
+    type: type,
+    table: 'parties',
     // Is this resource public ?
     // Can it be read / updated / inserted publicly ?
     public: false,
@@ -122,9 +115,9 @@ exports = module.exports = function (sri4node, winston) {
     afterinsert: [],
     afterdelete: [],
     customroutes: [
-      attachments.customRouteForUpload('/parties'),
-      attachments.customRouteForDownload('/parties'),
-      attachments.customRouteForDelete('/parties')
+      attachments.customRouteForUpload(type),
+      attachments.customRouteForDownload(type),
+      attachments.customRouteForDelete(type)
     ]
   };
 
