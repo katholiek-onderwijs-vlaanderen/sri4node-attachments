@@ -332,8 +332,3 @@ exports = module.exports = {
     };
   }
 };
-
-// TODO : Check idempotency of PUT and DELETE
-// TODO : Define resource with S3 and file storage to test both
-// TODO : When BLOB database storage is implemented, also add a resource on that with tests
-// TODO : Implement + check after & before function (with database access) on GET, PUT and DELETE.

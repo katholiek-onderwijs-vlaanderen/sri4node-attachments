@@ -6,7 +6,7 @@ var sri4node = require('sri4node');
 
 var app = express();
 
-var verbose = true;
+var verbose = false;
 var winston = require('winston');
 winston.level = verbose ? 'debug' : 'info';
 

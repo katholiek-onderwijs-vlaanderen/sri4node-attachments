@@ -108,6 +108,87 @@ exports = module.exports = function (base, winston) {
           assert.equal(response.statusCode, 404);
         });
       });
+
+      it('should be idempotent.', function () {
+        var body = {
+          type: 'person',
+          name: 'test user',
+          status: 'active'
+        };
+        var id = uuid.v4();
+        var size;
+
+        debug('Generated UUID=' + id);
+        return doPut(base + '/parties/' + id, body, 'annadv', 'test').then(function (response) {
+          assert.equal(response.statusCode, 201);
+          debug('PUTting the profile image as attachment.');
+          var file = 'test/orange-boy-icon.png';
+          return doPutFile(base + '/parties/' + id + '/profile.png', file, 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 201);
+          return doGet(base + '/parties/' + id + '/profile.png', 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 200);
+          if (!response.body.length || response.body.length < 10000) {
+            assert.fail('Response too small, it should be the 10.x Kb image we sent...');
+          }
+          size = response.body.length;
+          var file = 'test/orange-boy-icon.png';
+          return doPutFile(base + '/parties/' + id + '/profile.png', file, 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 200);
+          return doGet(base + '/parties/' + id + '/profile.png', 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 200);
+          if (!response.body.length || response.body.length !== size) {
+            assert.fail('Size should be constant.');
+          }
+        });
+      });
+    });
+
+    describe('DELETE', function () {
+      it('should be idempotent.', function () {
+        var body = {
+          type: 'person',
+          name: 'test user',
+          status: 'active'
+        };
+        var id = uuid.v4();
+
+        debug('Generated UUID=' + id);
+        return doPut(base + '/parties/' + id, body, 'annadv', 'test').then(function (response) {
+          assert.equal(response.statusCode, 201);
+          debug('PUTting the profile image as attachment.');
+          var file = 'test/orange-boy-icon.png';
+          return doPutFile(base + '/parties/' + id + '/profile.png', file, 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 201);
+          return doGet(base + '/parties/' + id + '/profile.png', 'annadv', 'test');
+        }).then(function (response) {
+          debug('Retrieving of file done');
+          debug('status code : ' + response.statusCode);
+          debug('body length : ' + response.body.length);
+          assert.equal(response.statusCode, 200);
+          if (!response.body.length || response.body.length < 10000) {
+            assert.fail('Response too small, it should be the 10.x Kb image we sent...');
+          }
+          return doDelete(base + '/parties/' + id + '/profile.png', 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 200);
+          // Delete again.
+          return doDelete(base + '/parties/' + id + '/profile.png', 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 200);
+          // Now check that is is gone..
+          return doGet(base + '/parties/' + id + '/profile.png', 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 404);
+        });
+      });
     });
   });
 };
+// TODO : Define resource with S3 and file storage to test both
+// TODO : When BLOB database storage is implemented, also add a resource on that with tests
+// TODO : Implement + check after & before function (with database access) on GET, PUT and DELETE.
