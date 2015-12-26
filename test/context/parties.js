@@ -1,5 +1,5 @@
 var Q = require('q');
-var sri4nodeAttachments = require('../sri4node-attachments.js');
+var sri4nodeAttachments = require('../../sri4node-attachments.js');
 
 exports = module.exports = function (sri4node, winston) {
   'use strict';
@@ -123,7 +123,8 @@ exports = module.exports = function (sri4node, winston) {
     afterdelete: [],
     customroutes: [
       attachments.customRouteForUpload('/parties'),
-      attachments.customRouteForDownload('/parties')
+      attachments.customRouteForDownload('/parties'),
+      attachments.customRouteForDelete('/parties')
     ]
   };
 

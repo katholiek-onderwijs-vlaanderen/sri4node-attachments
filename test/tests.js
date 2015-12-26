@@ -10,7 +10,7 @@ var verbose = true;
 var winston = require('winston');
 winston.level = verbose ? 'debug' : 'info';
 
-var mapping = require('./config.js')(sri4node, verbose, winston);
+var mapping = require('./context/config.js')(sri4node, verbose, winston);
 var port = 5000;
 var base = 'http://localhost:' + port;
 

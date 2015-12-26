@@ -2,6 +2,7 @@ var assert = require('assert');
 var sriclient = require('sri4node-client');
 var doGet = sriclient.get;
 var doPut = sriclient.put;
+var doDelete = sriclient.delete;
 var needle = require('needle');
 var Q = require('q');
 var uuid = require('node-uuid');
@@ -74,7 +75,7 @@ exports = module.exports = function (base, winston) {
         return doPut(base + '/parties/' + id, body, 'annadv', 'test').then(function (response) {
           assert.equal(response.statusCode, 201);
           debug('PUTting the profile image as attachment.');
-          var file = '/home/ubuntu/workspace/inner-gerbil/test/orange-boy-icon.png';
+          var file = 'test/orange-boy-icon.png';
           return doPutFile(base + '/parties/' + id + '/profile.png', file, 'annadv', 'test');
         }).then(function (response) {
           assert.equal(response.statusCode, 201);
@@ -84,14 +85,29 @@ exports = module.exports = function (base, winston) {
           debug('status code : ' + response.statusCode);
           debug('body length : ' + response.body.length);
           assert.equal(response.statusCode, 200);
-          if (response.body.length && response.body.length < 10000) {
+          if (!response.body.length || response.body.length < 10000) {
             assert.fail('Response too small, it should be the 10.x Kb image we sent...');
           }
+          var file = 'test/little-boy-white.png';
+          return doPutFile(base + '/parties/' + id + '/profile.png', file, 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 200);
+          return doGet(base + '/parties/' + id + '/profile.png', 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 200);
+          if (!response.body.length || response.body.length < 6000 || response.body > 9000) {
+            assert.fail('Replaced image should be about 7Kb...');
+          }
+          // Next : try to delete the resource.
+          return doDelete(base + '/parties/' + id + '/profile.png', 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 200);
+          // Now check that is is gone..
+          return doGet(base + '/parties/' + id + '/profile.png', 'annadv', 'test');
+        }).then(function (response) {
+          assert.equal(response.statusCode, 404);
         });
       });
     });
   });
 };
-
-// TODO : Test replacing of profile image.
-// TODO : Test removing of profile image.

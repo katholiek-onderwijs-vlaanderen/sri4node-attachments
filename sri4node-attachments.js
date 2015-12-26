@@ -122,7 +122,6 @@ exports = module.exports = {
         msg = 'All attempts to uploads failed!';
         error(msg);
         error(err);
-        error(err.stack);
         deferred.reject(msg);
       });
       uploader.on('end', function () {
@@ -147,7 +146,22 @@ exports = module.exports = {
         msg = 'All attempts to download failed!';
         error(msg);
         error(err);
-        error(err.stack);
+        response.sendStatus(500);
+      });
+    }
+
+    function deleteFromS3(s3client, response, filename) {
+      var s3bucket = configuration.s3bucket;
+      var msg;
+
+      var params = {
+        Bucket: s3bucket,
+        Key: filename
+      };
+      s3client.deleteObjects(params).on('error', function (err) {
+        msg = 'All attempts to delete failed!';
+        error(msg);
+        error(err);
         response.sendStatus(500);
       });
     }
@@ -159,10 +173,12 @@ exports = module.exports = {
       var fromFilename;
       var toFilename;
       var promises = [];
+      var stats;
 
       debug('handling file upload !');
       debug(req.files);
 
+      var statusCode = 200;
       if (s3client) {
         for (i = 0; i < req.files.length; i++) {
           fromFilename = req.files[i].path;
@@ -170,16 +186,26 @@ exports = module.exports = {
           promises.push(uploadToS3(s3client, fromFilename, toFilename));
         }
       } else {
-        warn('Sending files to temporary storage. SHOULD NOT BE USED IN PRODUCTION !');
         for (i = 0; i < req.files.length; i++) {
           fromFilename = req.files[i].path;
           toFilename = path + '/' + req.params.key + '-' + req.params.filename;
+          try {
+            stats = fs.lstatSync(toFilename);
+          } catch(err) {
+            if (err.code === 'ENOENT') {
+              // At least one of the files did not exist -> return 201.
+              statusCode = 201;
+            } else {
+              error(err);
+            }
+          }
           promises.push(qfs.copy(fromFilename, toFilename));
         }
       }
+
       Q.all(promises).then(function () {
         // Acknowledge to the client that the files were stored.
-        res.sendStatus(201);
+        res.sendStatus(statusCode);
       }).catch(function (err) {
         error('Unable to upload all files...');
         error(err);
@@ -194,17 +220,69 @@ exports = module.exports = {
       var s3client = createS3Client(configuration);
       var remoteFilename;
       var localFilename;
+      var exists;
 
       debug('handling file download !');
       if (s3client) {
         remoteFilename = req.params.key + '-' + req.params.filename;
         downloadFromS3(s3client, res, remoteFilename);
       } else {
-        warn('Reading files from temporary storage. SHOULD NOT BE USED IN PRODUCTION !');
         localFilename = path + '/' + req.params.key + '-' + req.params.filename;
-        // TODO : Store meta-information like content-type in a second file on disk.
-        res.setHeader('content-type', 'image/png');
-        fs.createReadStream(localFilename).pipe(res);
+        try {
+          fs.lstatSync(localFilename);
+          exists = true;
+        } catch(err) {
+          if (err.code === 'ENOENT') {
+            exists = false;
+          } else {
+            error('Unable to determine if file exists...');
+            error(err);
+            res.sendStatus(500);
+            return;
+          }
+        }
+        if (exists) {
+          // TODO : Store meta-information like content-type in a second file on disk.
+          res.setHeader('content-type', 'image/png');
+          fs.createReadStream(localFilename).pipe(res);
+        } else {
+          // If no such file exist, send 404 to the client.
+          res.sendStatus(404);
+        }
+      }
+    }
+
+    function handleFileDelete(req, res) {
+      var path = configuration.folder;
+      var s3client = createS3Client(configuration);
+      var remoteFilename;
+      var localFilename;
+      var exists;
+
+      debug('handling file delete !');
+      if (s3client) {
+        remoteFilename = req.params.key + '-' + req.params.filename;
+        deleteFromS3(s3client, res, remoteFilename);
+      } else {
+        localFilename = path + '/' + req.params.key + '-' + req.params.filename;
+        try {
+          fs.lstatSync(localFilename);
+          exists = true;
+        } catch(err) {
+          if (err.code === 'ENOENT') {
+            exists = false;
+          } else {
+            error('Unable to determine if file exists...');
+            error(err);
+            res.sendStatus(500);
+            return;
+          }
+        }
+        if (exists) {
+          fs.unlinkSync(localFilename);
+          debug('File was deleted !');
+        }
+        res.sendStatus(200);
       }
     }
 
@@ -232,6 +310,15 @@ exports = module.exports = {
           method: 'GET',
           middleware: extraMiddleware,
           handler: handleFileDownload
+        };
+      },
+
+      customRouteForDelete: function (type, extraMiddleware) {
+        return {
+          route: type + '/:key/:filename',
+          method: 'DELETE',
+          middleware: extraMiddleware,
+          handler: handleFileDelete
         };
       }
     };
