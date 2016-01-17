@@ -25,7 +25,6 @@
     "mocha": "~2.2.4",
     "node-uuid": "~1.4.3",
     "needle": "0.x",
-    "winston": "2.x",
     "eslint": "~1.4.3",
     "sri4node": "1.x"
   },
