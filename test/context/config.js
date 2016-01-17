@@ -1,17 +1,15 @@
 /* Configuration for sri4node, used for our server.js, but also for mocha tests */
 var Q = require('q');
 var sri4nodeAttachments = require('../../js/sri4node-attachments.js');
+var common = require('../../js/common.js');
+var error = common.error;
 
 var knownIdentities = {};
 var knownPasswords = {};
 
-exports = module.exports = function (sri4node, verbose, winston) {
+exports = module.exports = function (sri4node, verbose) {
   'use strict';
   var $u = sri4node.utils;
-
-  function error(x) {
-    winston.log('error', x);
-  }
 
   var myAuthenticator = function (db, username, password) {
     var deferred = Q.defer();
@@ -114,11 +112,12 @@ exports = module.exports = function (sri4node, verbose, winston) {
     return deferred.promise;
   };
 
-  var folderConfig = sri4nodeAttachments.configure(winston, {
-    folder: '/tmp/inner-gerbil'
+  var folderConfig = sri4nodeAttachments.configure({
+    folder: '/tmp/inner-gerbil',
+    verbose: verbose
   });
 
-  var s3config = sri4nodeAttachments.configure(winston, {
+  var s3config = sri4nodeAttachments.configure({
     s3key: process.env.S3_KEY, // eslint-disable-line
     s3secret: process.env.S3_SECRET, // eslint-disable-line
     s3bucket: process.env.S3_BUCKET, // eslint-disable-line
@@ -134,8 +133,8 @@ exports = module.exports = function (sri4node, verbose, winston) {
     defaultdatabaseurl: 'postgres://gerbil:inner@localhost:5432/postgres',
     description: '',
     resources: [
-      require('./parties')(sri4node, winston, folderConfig, '/partiesFolder'),
-      require('./parties')(sri4node, winston, s3config, '/partiesS3')
+      require('./parties')(sri4node, verbose, folderConfig, '/partiesFolder'),
+      require('./parties')(sri4node, verbose, s3config, '/partiesS3')
     ]
   };
 };

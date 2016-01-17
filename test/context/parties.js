@@ -1,6 +1,6 @@
 //var Q = require('q');
 
-exports = module.exports = function (sri4node, winston, attachments, type) {
+exports = module.exports = function (sri4node, verbose, attachments, type) {
   'use strict';
   //var $u = sri4node.utils;
   var $m = sri4node.mapUtils;
@@ -8,7 +8,9 @@ exports = module.exports = function (sri4node, winston, attachments, type) {
   var $q = sri4node.queryUtils;
 /*
   function debug(x) {
-    winston.log('debug', x);
+    if(verbose) {
+      console.log(x); // eslint-disable-line
+    }
   }
 */
   var ret = {

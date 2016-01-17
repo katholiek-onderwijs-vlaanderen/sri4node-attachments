@@ -6,34 +6,11 @@ var doDelete = sriclient.delete;
 var needle = require('needle');
 var Q = require('q');
 var uuid = require('node-uuid');
-var useWinston = true;
+var common = require('../js/common.js');
+var debug = common.debug;
 
-exports = module.exports = function (base, winston, type) {
+exports = module.exports = function (base, type) {
   'use strict';
-/*
-  function warn(x) {
-    if (!useWinston) {
-      console.log(x); // eslint-disable-line
-    } else {
-      winston.log('warn', x);
-    }
-  }
-
-  function error(x) {
-    if (!useWinston) {
-      console.log(x); // eslint-disable-line
-    } else {
-      winston.log('error', x);
-    }
-  }
-*/
-  function debug(x) {
-    if (!useWinston) {
-      console.log(x); // eslint-disable-line
-    } else {
-      winston.log('debug', x);
-    }
-  }
 
   function doPutFile(url, filename, user, pwd) {
     var deferred = Q.defer();

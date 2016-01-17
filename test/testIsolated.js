@@ -8,7 +8,7 @@ var Q = require('q');
 var uuid = require('node-uuid');
 var useWinston = true;
 
-exports = module.exports = function (base, winston, type) {
+exports = module.exports = function (base, verbose, type) {
   'use strict';
 /*
   function warn(x) {

@@ -5,16 +5,11 @@ var fs = require('fs');
 var multer = require('multer');
 var multerAutoReap = require('multer-autoreap');
 multerAutoReap.options.reapOnError = true;
-
-function mergeObject(source, target) {
-  'use strict';
-  var key;
-  for (key in source) {
-    if (source.hasOwnProperty(key)) {
-      target[key] = source[key];
-    }
-  }
-}
+var common = require('./common.js');
+var objectMerge = common.objectMerge;
+var warn = common.warn;
+var error = common.error;
+var debug = common.debug;
 
 exports = module.exports = {
   configure: function (config) {
@@ -34,7 +29,7 @@ exports = module.exports = {
       folder: '/tmp',
       verbose: false
     };
-    mergeObject(config, configuration);
+    objectMerge(configuration, config);
 
     // Use disk storage, limit to 5 files of max X Mb each.
     // Avoids DoS attacks, or other service unavailability.
@@ -56,20 +51,6 @@ exports = module.exports = {
         headerPairs: 100
       }
     });
-
-    function warn(x) {
-      console.warn(x); // eslint-disable-line
-    }
-
-    function error(x) {
-      console.error(x); // eslint-disable-line
-    }
-
-    function debug(x) {
-      if (verbose) {
-        console.log(x); // eslint-disable-line
-      }
-    }
 
     function createS3Client() {
       var s3key = configuration.s3key; // eslint-disable-line

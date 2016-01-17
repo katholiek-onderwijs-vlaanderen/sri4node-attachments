@@ -6,23 +6,14 @@ var sri4node = require('sri4node');
 
 var app = express();
 
-var verbose = false;
-var winston = require('winston');
-winston.level = verbose ? 'debug' : 'info';
-
-var mapping = require('./context/config.js')(sri4node, verbose, winston);
+var verbose = process.env.LOG_DEBUG ? true : false; // eslint-disable-line
+var mapping = require('./context/config.js')(sri4node, verbose);
 var port = 5000;
 var base = 'http://localhost:' + port;
 
-function info(x) {
-  'use strict';
-  winston.log('info', x);
-}
-
-function error(x) {
-  'use strict';
-  winston.log('error', x);
-}
+var common = require('../js/common.js');
+var info = common.info;
+var error = common.error;
 
 describe('sri4node-attachments : ', function () {
   'use strict';
@@ -41,8 +32,8 @@ describe('sri4node-attachments : ', function () {
     });
   });
 
-  require('./testPartyAttachments.js')(base, winston, '/partiesFolder');
-  require('./testPartyAttachments.js')(base, winston, '/partiesS3');
+  require('./testPartyAttachments.js')(base, '/partiesFolder');
+  require('./testPartyAttachments.js')(base, '/partiesS3');
 
-//  require('./testIsolated.js')(base, winston, '/partiesS3');
+//  require('./testIsolated.js')(base, '/partiesS3');
 });
