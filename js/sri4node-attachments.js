@@ -5,7 +5,6 @@ var fs = require('fs');
 var multer = require('multer');
 var multerAutoReap = require('multer-autoreap');
 multerAutoReap.options.reapOnError = true;
-var useWinston = true;
 
 function mergeObject(source, target) {
   'use strict';
@@ -18,7 +17,7 @@ function mergeObject(source, target) {
 }
 
 exports = module.exports = {
-  configure: function (winston, config) {
+  configure: function (config) {
     'use strict';
 
     var diskstorage;
@@ -32,7 +31,8 @@ exports = module.exports = {
       s3region: 'eu-west-1',
       maximumFilesizeInMB: 10,
       tempFolder: process.env.TMP ? process.env.TMP : '/tmp', // eslint-disable-line
-      folder: '/tmp'
+      folder: '/tmp',
+      verbose: false
     };
     mergeObject(config, configuration);
 
@@ -58,26 +58,16 @@ exports = module.exports = {
     });
 
     function warn(x) {
-      if (!useWinston) {
-        console.log(x); // eslint-disable-line
-      } else {
-        winston.log('warn', x);
-      }
+      console.warn(x); // eslint-disable-line
     }
 
     function error(x) {
-      if (!useWinston) {
-        console.log(x); // eslint-disable-line
-      } else {
-        winston.log('error', x);
-      }
+      console.error(x); // eslint-disable-line
     }
 
     function debug(x) {
-      if (!useWinston) {
+      if (verbose) {
         console.log(x); // eslint-disable-line
-      } else {
-        winston.log('debug', x);
       }
     }
 
