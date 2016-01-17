@@ -6,7 +6,7 @@ var doDelete = sriclient.delete;
 var needle = require('needle');
 var Q = require('q');
 var uuid = require('node-uuid');
-var common = require('../../js/common.js');
+var common = require('../js/common.js');
 var debug = common.debug;
 
 exports = module.exports = function (base, type) {
