@@ -10,6 +10,11 @@ var objectMerge = common.objectMerge;
 var warn = common.warn;
 var error = common.error;
 var debug = common.debug;
+const streams = require('memory-streams');
+const pEvent = require('p-event');
+const { SriError } = require('sri4node/js/common.js')
+const S3 = require('aws-sdk/clients/s3');
+var awss3;
 
 exports = module.exports = {
   configure: function (config) {
@@ -31,26 +36,37 @@ exports = module.exports = {
     };
     objectMerge(configuration, config);
 
+    function createAWSS3Client() {
+      if (configuration.s3key && configuration.s3secret) {
+        return new S3({
+          apiVersion: '2006-03-01',
+          accessKeyId: configuration.s3key,
+          secretAccessKey: configuration.s3secret,
+          region: configuration.s3region
+        })
+      }
+      return null;
+    }
     // Use disk storage, limit to 5 files of max X Mb each.
     // Avoids DoS attacks, or other service unavailability.
     // Files are streamed from network -> temporary disk files.
     // This requires virtually no memory on the server.
-    diskstorage = multer.diskStorage({
-      destination: configuration.tempFolder
-    });
+    // diskstorage = multer.diskStorage({
+    //   destination: configuration.tempFolder
+    // });
 
-    upload = multer({
-      storage: diskstorage,
-      limits: {
-        fieldNameSize: 256,
-        fieldSize: 1024,
-        fields: 5,
-        fileSize: configuration.maximumFilesizeInMB * 1024 * 1024,
-        files: 5,
-        parts: 10,
-        headerPairs: 100
-      }
-    });
+    // upload = multer({
+    //   storage: diskstorage,
+    //   limits: {
+    //     fieldNameSize: 256,
+    //     fieldSize: 1024,
+    //     fields: 5,
+    //     fileSize: configuration.maximumFilesizeInMB * 1024 * 1024,
+    //     files: 5,
+    //     parts: 10,
+    //     headerPairs: 100
+    //   }
+    // });
 
     function createS3Client() {
       var s3key = configuration.s3key; // eslint-disable-line
@@ -146,7 +162,7 @@ exports = module.exports = {
       return deferred.promise;
     }
 
-    function downloadFromS3(s3client, response, filename) {
+    function downloadFromS3(s3client, outstream, filename) {
       var deferred = Q.defer();
 
       var s3bucket = configuration.s3bucket;
@@ -160,7 +176,7 @@ exports = module.exports = {
       existsOnS3(s3client, filename).then(function (exists) {
         if (exists) {
           stream = s3client.downloadStream(params);
-          stream.pipe(response);
+          stream.pipe(outstream);
           stream.on('error', function (err) {
             msg = 'All attempts to download failed!';
             error(msg);
@@ -189,11 +205,9 @@ exports = module.exports = {
       var params = {
         Bucket: s3bucket,
         Delete: {
-          Objects: [
-            {
-              Key: filename
-            }
-          ]
+          Objects: [{
+            Key: filename
+          }]
         }
       };
       deleter = s3client.deleteObjects(params);
@@ -210,84 +224,31 @@ exports = module.exports = {
       return deferred.promise;
     }
 
-    function handleFileUpload(req, res) {
-      var deferred = Q.defer();
-
-      var path = configuration.folder;
-      var s3client = createS3Client();
-      var i;
-      var fromFilename;
-      var toFilename;
-      var promises = [];
-      var statusCode;
-
+    async function handleFileUpload(tx, sriRequest) {
       debug('handling file upload !');
-      debug(req.files);
 
-      if (s3client) {
-        statusCode = 200;
-        for (i = 0; i < req.files.length; i++) {
-          fromFilename = req.files[i].path;
-          toFilename = req.params.key + '-' + req.params.filename;
-          promises.push(uploadToS3(s3client, fromFilename, toFilename));
-        }
-        Q.all(promises).then(function (results) {
-          for (i = 0; i < results.length; i++) {
-            // Maximum status code goes to the client.
-            if (results[i] && results[i] > statusCode) {
-              statusCode = results[i];
-            }
-          }
-          // Acknowledge to the client that the files were stored.
-          res.sendStatus(statusCode);
-          deferred.resolve();
-        }).catch(function (err) {
-          error('Unable to upload all files...');
-          error(err);
-          // Notify the client that a problem occured.
-          res.sendStatus(500);
-          deferred.resolve();
-        });
-      } else {
-        if (path === '/tmp') {
-          warn('Storing files in /tmp. Only for testing purposes. DO NOT USE IN PRODUCTION !');
-        }
-        statusCode = 200;
-        for (i = 0; i < req.files.length; i++) {
-          fromFilename = req.files[i].path;
-          toFilename = path + '/' + req.params.key + '-' + req.params.filename;
-          try {
-            fs.lstatSync(toFilename);
-          } catch (err) {
-            if (err.code === 'ENOENT') {
-              // At least one of the files did not exist -> return 201.
-              statusCode = 201;
-            } else {
-              error(err);
-            }
-          }
-          promises.push(qfs.copy(fromFilename, toFilename));
-        }
-        Q.all(promises).then(function () {
-          // Acknowledge to the client that the files were stored.
-          res.sendStatus(statusCode);
-          deferred.resolve();
-        }).catch(function (err) {
-          error('Unable to upload all files...');
-          error(err);
-          // Notify the client that a problem occured.
-          res.sendStatus(500);
-          deferred.resolve();
-        });
-      }
+      let file = sriRequest.attachmentRcvd;
+      let body = file.buffer ? file.buffer : file.writer.toBuffer();
+      let awss3 = createAWSS3Client();
+      let params = { Bucket: configuration.s3bucket, Key: sriRequest.attachmentRcvd.s3filename, ACL: "bucket-owner-full-control", Body: body };
 
-      return deferred.promise;
+      console.log(params);
+
+      await new Promise((accept, reject) => {
+        awss3.upload(params, function (err, data) {
+          if (err) { // an error occurred
+            console.log(err, err.stack)
+            reject(err);
+          } else {
+            console.log(data); // successful response
+            accept(data)
+          }
+        });
+      });
     }
 
-    function handleFileDownload(req, res) {
-      var deferred = Q.defer();
+    async function handleFileDownload(tx, sriRequest, stream) {
 
-      var path = configuration.folder;
       var s3client = createS3Client(configuration);
       var remoteFilename;
       var localFilename;
@@ -296,57 +257,29 @@ exports = module.exports = {
 
       debug('handling file download !');
       if (s3client) {
-        remoteFilename = req.params.key + '-' + req.params.filename;
-        downloadFromS3(s3client, res, remoteFilename).then(function (status) {
+        remoteFilename = sriRequest.params.key + '-' + sriRequest.params.filename;
+        try {
+          let status = await downloadFromS3(s3client, stream, remoteFilename)
+
           // File was streamed to client.
           if (status === 404) {
-            res.sendStatus(404);
+            throw new sriRequest.SriError({
+              status: 404
+            })
           }
-          deferred.resolve();
-        }).catch(function (err) {
-          msg = 'Unable to download a file.';
-          error(msg);
-          error(err);
-          res.sendStatus(500);
-          deferred.resolve();
-        });
-      } else {
-        if (path === '/tmp') {
-          warn('Storing files in /tmp. Only for testing purposes. DO NOT USE IN PRODUCTION !');
-        }
-        localFilename = path + '/' + req.params.key + '-' + req.params.filename;
-        try {
-          fs.lstatSync(localFilename);
-          exists = true;
+
         } catch (err) {
-          if (err.code === 'ENOENT') {
-            exists = false;
-          } else {
-            error('Unable to determine if file exists...');
-            error(err);
-            res.sendStatus(500);
-            deferred.resolve();
-            return deferred.resolve();
-          }
-        }
-        if (exists) {
-          // TODO : Store meta-information like content-type in a second file on disk.
-          res.setHeader('content-type', 'image/png');
-          fs.createReadStream(localFilename).pipe(res).on('end', function () {
-            deferred.resolve();
-          }).on('error', function () {
-            debug('Streaming file to client failed.');
-            res.sendStatus(500);
-            deferred.resolve();
-          });
-        } else {
-          // If no such file exist, send 404 to the client.
-          res.sendStatus(404);
-          deferred.resolve();
+          throw new sriRequest.SriError({
+            status: 500,
+            errors: [{
+              code: 'download.failed',
+              type: 'ERROR',
+              message: 'unable to download the file'
+            }]
+          })
+
         }
       }
-
-      return deferred.promise;
     }
 
     function handleFileDelete(req, res) {
@@ -401,37 +334,91 @@ exports = module.exports = {
     }
 
     return {
-      customRouteForUpload: function (type, extraMiddleware) {
-        var allMiddleware = [
-          multerAutoReap,
-          upload.any()
-        ];
-        if (extraMiddleware) {
-          allMiddleware = allMiddleware.concat(extraMiddleware);
+      // customRouteForUpload: function () {
+      //   return {
+      //     route: '/:key/:filename',
+      //     method: 'PUT',
+      //     handler: handleFileUpload
+      //   };
+      // },
+
+      customRouteForUpload: function (runAfterUpload) {
+        return {
+          routePostfix: '/:key/attachments',
+          httpMethods: ['PUT'],
+          busBoy: true,
+
+          beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
+            sriRequest.busBoy.on('file', async function (fieldname, file, filename, encoding, mimetype) {
+              console.log('File [' + fieldname + ']: filename: ' + filename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
+
+              sriRequest.attachmentRcvd = ({ filename, mimetype, file, fields: {} });
+              sriRequest.attachmentRcvd.s3filename = sriRequest.params.key + '-' + filename;
+              sriRequest.attachmentRcvd.writer = new streams.WritableStream();
+
+              file.on('data', async function (data) {
+                //console.log('File [' + fieldname + '] got ' + data.length + ' bytes');
+                //write to buffer
+                sriRequest.attachmentRcvd.writer.write(data);
+              });
+            });
+
+            sriRequest.busBoy.on('field', function (fieldname, val, fieldnameTruncated, valTruncated, encoding, mimetype) {
+              console.log('Field [' + fieldname + ']: value: ' + val);
+              if (sriRequest.attachmentRcvd) {
+
+                sriRequest.attachmentRcvd.fields = sriRequest.attachmentRcvd.fields ? sriRequest.attachmentRcvd.fields : {};
+
+                sriRequest.attachmentRcvd.fields[fieldname] = val;
+              }
+            });
+
+          },
+          streamingHandler: async(tx, sriRequest, stream) => {
+            // wait until busboy is done
+            await pEvent(sriRequest.busBoy, 'finish')
+            console.log('busBoy is done'); //, sriRequest.attachmentRcvd)
+
+            await handleFileUpload(tx, sriRequest);
+            await runAfterUpload(tx, sriRequest);
+            stream.push('OK')
+          }
         }
+      },
 
+
+      customRouteForDownload: function () {
         return {
-          route: type + '/:key/:filename',
-          method: 'PUT',
-          middleware: allMiddleware,
-          handler: handleFileUpload
+          routePostfix: '/:key/attachments/:filename',
+
+          httpMethods: ['GET'],
+          binaryStream: true,
+          beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
+            return {
+              status: 200,
+              headers: [
+                ['Content-Disposition', 'inline; filename=' + sriRequest.params.filename],
+                ['Content-Type', 'image/jpeg'] //TODO npm install npm install mime-types
+              ]
+            }
+          },
+          streamingHandler: async(tx, sriRequest, stream) => {
+            
+            await handleFileDownload(tx, sriRequest, stream);
+            console.log('streaming download done');
+            // var fstream = fs.createReadStream('test/files/test.jpg');
+            // fstream.pipe(stream);
+
+            // // wait until fstream is done
+            // await pEvent(fstream, 'end')
+          }
         };
       },
 
-      customRouteForDownload: function (type, extraMiddleware) {
+      customRouteForDelete: function () {
         return {
-          route: type + '/:key/:filename',
-          method: 'GET',
-          middleware: extraMiddleware,
-          handler: handleFileDownload
-        };
-      },
-
-      customRouteForDelete: function (type, extraMiddleware) {
-        return {
-          route: type + '/:key/:filename',
-          method: 'DELETE',
-          middleware: extraMiddleware,
+          routePostfix: '/:key/:filename',
+          httpMethods: ['DELETE'],
           handler: handleFileDelete
         };
       }
