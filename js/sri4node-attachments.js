@@ -12,7 +12,7 @@ var error = common.error;
 var debug = common.debug;
 const streams = require('memory-streams');
 const pEvent = require('p-event');
-const { SriError } = require('sri4node/js/common.js')
+// const { SriError } = require('sri4node/js/common.js')
 const S3 = require('aws-sdk/clients/s3');
 var awss3;
 
@@ -188,14 +188,14 @@ exports = module.exports = {
             deferred.resolve(200);
           });
         } else {
-          deferred.resolve(404);
+          deferred.reject(404);
         }
       });
 
       return deferred.promise;
     }
 
-    function deleteFromS3(s3client, response, filename) {
+    function deleteFromS3(s3client, filename) {
       var deferred = Q.defer();
 
       var s3bucket = configuration.s3bucket;
@@ -224,13 +224,12 @@ exports = module.exports = {
       return deferred.promise;
     }
 
-    async function handleFileUpload(tx, sriRequest) {
+    async function handleFileUpload(file) {
       debug('handling file upload !');
 
-      let file = sriRequest.attachmentRcvd;
       let body = file.buffer ? file.buffer : file.writer.toBuffer();
       let awss3 = createAWSS3Client();
-      let params = { Bucket: configuration.s3bucket, Key: sriRequest.attachmentRcvd.s3filename, ACL: "bucket-owner-full-control", Body: body };
+      let params = { Bucket: configuration.s3bucket, Key: file.s3filename, ACL: "bucket-owner-full-control", Body: body };
 
       console.log(params);
 
@@ -261,14 +260,16 @@ exports = module.exports = {
         try {
           let status = await downloadFromS3(s3client, stream, remoteFilename)
 
+
+        } catch (err) {
+
           // File was streamed to client.
-          if (status === 404) {
+          if (err === 404) {
             throw new sriRequest.SriError({
               status: 404
             })
           }
 
-        } catch (err) {
           throw new sriRequest.SriError({
             status: 500,
             errors: [{
@@ -282,55 +283,31 @@ exports = module.exports = {
       }
     }
 
-    function handleFileDelete(req, res) {
-      var deferred = Q.defer();
+    async function handleFileDelete(tx, sriRequest) {
 
-      var path = configuration.folder;
       var s3client = createS3Client(configuration);
       var remoteFilename;
-      var localFilename;
-      var exists;
+
 
       debug('handling file delete !');
       if (s3client) {
-        remoteFilename = req.params.key + '-' + req.params.filename;
-        deleteFromS3(s3client, res, remoteFilename).then(function () {
-          res.sendStatus(200);
-          deferred.resolve();
-        }).catch(function (err) {
+        remoteFilename = sriRequest.params.key + '-' + sriRequest.params.filename;
+        try {
+          await deleteFromS3(s3client, remoteFilename)
+          return { status: 204 };
+        } catch (err) {
           error('Unable to delete file [' + remoteFilename + ']');
           error(err);
-          res.sendStatus(500);
-          deferred.resolve();
-        });
-      } else {
-        if (path === '/tmp') {
-          warn('Storing files in /tmp. Only for testing purposes. DO NOT USE IN PRODUCTION !');
+          throw new sriRequest.SriError({
+            status: 500,
+            errors: [{
+              code: 'delete.failed',
+              type: 'ERROR',
+              message: 'Unable to delete file [' + remoteFilename + ']'
+            }]
+          })
         }
-        localFilename = path + '/' + req.params.key + '-' + req.params.filename;
-        try {
-          fs.lstatSync(localFilename);
-          exists = true;
-        } catch (err) {
-          if (err.code === 'ENOENT') {
-            exists = false;
-          } else {
-            error('Unable to determine if file exists...');
-            error(err);
-            res.sendStatus(500);
-            deferred.resolve();
-            return deferred.promise;
-          }
-        }
-        if (exists) {
-          fs.unlinkSync(localFilename);
-          debug('File was deleted !');
-        }
-        res.sendStatus(200);
-        deferred.resolve();
       }
-
-      return deferred.promise;
     }
 
     return {
@@ -349,38 +326,56 @@ exports = module.exports = {
           busBoy: true,
 
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
-            sriRequest.busBoy.on('file', async function (fieldname, file, filename, encoding, mimetype) {
-              console.log('File [' + fieldname + ']: filename: ' + filename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
+            sriRequest.attachmentsRcvd = [];
 
-              sriRequest.attachmentRcvd = ({ filename, mimetype, file, fields: {} });
-              sriRequest.attachmentRcvd.s3filename = sriRequest.params.key + '-' + filename;
-              sriRequest.attachmentRcvd.writer = new streams.WritableStream();
+            sriRequest.busBoy.on('file',
+              async function (fieldname, file, filename, encoding, mimetype) {
 
-              file.on('data', async function (data) {
-                //console.log('File [' + fieldname + '] got ' + data.length + ' bytes');
-                //write to buffer
-                sriRequest.attachmentRcvd.writer.write(data);
+                console.log('File [' + fieldname + ']: filename: ' + filename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
+
+                let fileObj = ({ filename, mimetype, file, fields: {} });
+                fileObj.s3filename = sriRequest.params.key + '-' + filename;
+                fileObj.writer = new streams.WritableStream();
+
+                file.on('data', async function (data) {
+                  //console.log('File [' + fieldname + '] got ' + data.length + ' bytes');
+                  //write to buffer
+                  fileObj.writer.write(data);
+                });
+                sriRequest.attachmentsRcvd.push(fileObj);
               });
-            });
 
-            sriRequest.busBoy.on('field', function (fieldname, val, fieldnameTruncated, valTruncated, encoding, mimetype) {
-              console.log('Field [' + fieldname + ']: value: ' + val);
-              if (sriRequest.attachmentRcvd) {
+            // sriRequest.busBoy.on('field', function (fieldname, val, fieldnameTruncated, valTruncated, encoding, mimetype) {
+            //   console.log('Field [' + fieldname + ']: value: ' + val);
+            //   if (sriRequest.attachmentsRcvd) {
 
-                sriRequest.attachmentRcvd.fields = sriRequest.attachmentRcvd.fields ? sriRequest.attachmentRcvd.fields : {};
+            //     sriRequest.attachmentsRcvd.fields = sriRequest.attachmentsRcvd.fields ? sriRequest.attachmentsRcvd.fields : {};
 
-                sriRequest.attachmentRcvd.fields[fieldname] = val;
-              }
-            });
+            //     sriRequest.attachmentsRcvd.fields[fieldname] = val;
+            //   }
+            // });
 
           },
           streamingHandler: async(tx, sriRequest, stream) => {
             // wait until busboy is done
             await pEvent(sriRequest.busBoy, 'finish')
-            console.log('busBoy is done'); //, sriRequest.attachmentRcvd)
+            console.log('busBoy is done'); //, sriRequest.attachmentsRcvd)
 
-            await handleFileUpload(tx, sriRequest);
-            await runAfterUpload(tx, sriRequest);
+            let uploads = [];
+
+            const handleTheFile = async function (att) {
+              await handleFileUpload(att);
+              await runAfterUpload(tx, sriRequest, att);
+            }
+
+            sriRequest.attachmentsRcvd.forEach(att => {
+              uploads.push(
+                handleTheFile(att)
+              )
+            })
+
+            await Promise.all(uploads);
+
             stream.push('OK')
           }
         }
@@ -403,7 +398,7 @@ exports = module.exports = {
             }
           },
           streamingHandler: async(tx, sriRequest, stream) => {
-            
+
             await handleFileDownload(tx, sriRequest, stream);
             console.log('streaming download done');
             // var fstream = fs.createReadStream('test/files/test.jpg');
@@ -415,11 +410,12 @@ exports = module.exports = {
         };
       },
 
-      customRouteForDelete: function () {
+      customRouteForDelete: function (afterHandler) {
         return {
-          routePostfix: '/:key/:filename',
+          routePostfix: '/:key/attachments/:filename',
           httpMethods: ['DELETE'],
-          handler: handleFileDelete
+          handler: handleFileDelete,
+          afterHandler: afterHandler
         };
       }
     };
