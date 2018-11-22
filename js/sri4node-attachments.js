@@ -9,6 +9,7 @@ var debug = common.debug;
 const streams = require('memory-streams');
 const pEvent = require('p-event');
 const S3 = require('aws-sdk/clients/s3');
+const mime = require('mime-types');
 
 exports = module.exports = {
   configure: function (config) {
@@ -367,7 +368,7 @@ exports = module.exports = {
               status: 200,
               headers: [
                 ['Content-Disposition', 'inline; filename=' + sriRequest.params.filename],
-                ['Content-Type', 'image/jpeg'] //TODO npm install npm install mime-types
+                ['Content-Type', mime.contentType(sriRequest.params.filename)] //TODO npm install npm install mime-types
               ]
             }
           },
