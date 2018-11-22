@@ -1,10 +1,6 @@
 var s3 = require('s3');
 var Q = require('q');
-var qfs = require('q-io/fs');
-var fs = require('fs');
-var multer = require('multer');
-var multerAutoReap = require('multer-autoreap');
-multerAutoReap.options.reapOnError = true;
+
 var common = require('./common.js');
 var objectMerge = common.objectMerge;
 var warn = common.warn;
@@ -12,16 +8,11 @@ var error = common.error;
 var debug = common.debug;
 const streams = require('memory-streams');
 const pEvent = require('p-event');
-// const { SriError } = require('sri4node/js/common.js')
 const S3 = require('aws-sdk/clients/s3');
-var awss3;
 
 exports = module.exports = {
   configure: function (config) {
     'use strict';
-
-    var diskstorage;
-    var upload;
 
     // default configuration
     var configuration = {
@@ -29,9 +20,8 @@ exports = module.exports = {
       s3secret: '',
       s3bucket: '',
       s3region: 'eu-west-1',
+      maxRetries: 3,
       maximumFilesizeInMB: 10,
-      tempFolder: process.env.TMP ? process.env.TMP : '/tmp', // eslint-disable-line
-      folder: '/tmp',
       verbose: false
     };
     objectMerge(configuration, config);
@@ -42,31 +32,12 @@ exports = module.exports = {
           apiVersion: '2006-03-01',
           accessKeyId: configuration.s3key,
           secretAccessKey: configuration.s3secret,
-          region: configuration.s3region
+          region: configuration.s3region,
+          maxRetries: configuration.maxRetries
         })
       }
       return null;
     }
-    // Use disk storage, limit to 5 files of max X Mb each.
-    // Avoids DoS attacks, or other service unavailability.
-    // Files are streamed from network -> temporary disk files.
-    // This requires virtually no memory on the server.
-    // diskstorage = multer.diskStorage({
-    //   destination: configuration.tempFolder
-    // });
-
-    // upload = multer({
-    //   storage: diskstorage,
-    //   limits: {
-    //     fieldNameSize: 256,
-    //     fieldSize: 1024,
-    //     fields: 5,
-    //     fileSize: configuration.maximumFilesizeInMB * 1024 * 1024,
-    //     files: 5,
-    //     parts: 10,
-    //     headerPairs: 100
-    //   }
-    // });
 
     function createS3Client() {
       var s3key = configuration.s3key; // eslint-disable-line
@@ -75,7 +46,7 @@ exports = module.exports = {
       if (s3key && s3secret) {
         return s3.createClient({
           maxAsyncS3: 20,
-          s3RetryCount: 3,
+          s3RetryCount: configuration.maxRetries,
           s3RetryDelay: 1000,
           multipartUploadThreshold: (configuration.maximumFilesizeInMB + 1) * 1024 * 1024,
           multipartUploadSize: configuration.maximumFilesizeInMB * 1024 * 1024, // this is the default (15 MB)
@@ -326,6 +297,9 @@ exports = module.exports = {
           busBoy: true,
 
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
+
+          },
+          streamingHandler: async(tx, sriRequest, stream) => {
             sriRequest.attachmentsRcvd = [];
 
             sriRequest.busBoy.on('file',
@@ -345,6 +319,7 @@ exports = module.exports = {
                 sriRequest.attachmentsRcvd.push(fileObj);
               });
 
+
             // sriRequest.busBoy.on('field', function (fieldname, val, fieldnameTruncated, valTruncated, encoding, mimetype) {
             //   console.log('Field [' + fieldname + ']: value: ' + val);
             //   if (sriRequest.attachmentsRcvd) {
@@ -355,8 +330,7 @@ exports = module.exports = {
             //   }
             // });
 
-          },
-          streamingHandler: async(tx, sriRequest, stream) => {
+
             // wait until busboy is done
             await pEvent(sriRequest.busBoy, 'finish')
             console.log('busBoy is done'); //, sriRequest.attachmentsRcvd)
@@ -401,11 +375,6 @@ exports = module.exports = {
 
             await handleFileDownload(tx, sriRequest, stream);
             console.log('streaming download done');
-            // var fstream = fs.createReadStream('test/files/test.jpg');
-            // fstream.pipe(stream);
-
-            // // wait until fstream is done
-            // await pEvent(fstream, 'end')
           }
         };
       },
