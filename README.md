@@ -58,7 +58,25 @@ You can add custom handlers in the routes that are handling your attachments :
 
 You can use this to update for example a database table, or a JSONB column on the affected resource, etc..
 
+### Security
 
+This plugin works together with the sri4node-security-api plugin
+
+    const attachments = sri4nodeAttachments.configure({
+      s3key: process.env.S3_KEY,
+      s3secret: process.env.S3_SECRET,
+      s3bucket: process.env.S3_BUCKET,
+      s3region: 'eu-central-1',
+      security: {
+        plugin: securityPlugin,
+        abilityPrepend: ''
+      }
+    });
+    
+you have to send the securityplugin into the configuration. the securityplugin has to be at least #2.0.19 as it needs the `checkPermissionOnResourceList` function.
+
+* `plugin`: the security plugin
+* `abilityPrepend`: a string to prepend to the ability requested. upload will use ability `create`, download will use `read` and delete will use `delete`. if you want to have separate abilities for the attachments, like `attachment_create`,`attachment_read`,... set abilityPrepend to `attachment_`.
 
 ### Storing the attachment reference in your database
 
@@ -118,6 +136,8 @@ You can use this to update for example a database table, or a JSONB column on th
       }
     }
     ...
+    
+    
     
 ### TODO
 * update the tests

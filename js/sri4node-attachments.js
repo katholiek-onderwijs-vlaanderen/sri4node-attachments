@@ -21,6 +21,7 @@ exports = module.exports = {
       s3secret: '',
       s3bucket: '',
       s3region: 'eu-west-1',
+      security: { plugin: undefined, abilityPrepend: '' },
       maxRetries: 3,
       maximumFilesizeInMB: 10,
       verbose: false
@@ -282,6 +283,16 @@ exports = module.exports = {
       }
     }
 
+    async function checkSecurity(tx, sriRequest, ability) {
+      if (configuration.security.plugin) {
+        let security = configuration.security.plugin;
+        let attAbility = configuration.security.abilityPrepend + ability;
+        let permaResource = [sriRequest.sriType + '/' + sriRequest.params.key];
+        return await security.checkPermissionOnResourceList(tx, sriRequest, attAbility, permaResource);
+      }
+      return true;
+    }
+
     return {
       // customRouteForUpload: function () {
       //   return {
@@ -298,7 +309,7 @@ exports = module.exports = {
           busBoy: true,
 
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
-
+            await checkSecurity(tx, sriRequest, 'create');
           },
           streamingHandler: async(tx, sriRequest, stream) => {
             sriRequest.attachmentsRcvd = [];
@@ -364,6 +375,7 @@ exports = module.exports = {
           httpMethods: ['GET'],
           binaryStream: true,
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
+            await checkSecurity(tx, sriRequest, 'read');
             return {
               status: 200,
               headers: [
@@ -384,6 +396,9 @@ exports = module.exports = {
         return {
           routePostfix: '/:key/attachments/:filename',
           httpMethods: ['DELETE'],
+          beforeHandler: async(tx, sriRequest) => {
+            await checkSecurity(tx, sriRequest, 'delete');
+          },
           handler: handleFileDelete,
           afterHandler: afterHandler
         };
