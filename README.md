@@ -14,7 +14,8 @@ This is sri4node-attachments 2.0 for sri4node 2.0. it hooks into busboy's stream
       s3secret: process.env.S3_SECRET,
       s3bucket: process.env.S3_BUCKET,
       s3region: 'eu-central-1',
-      maxRetries: 3
+      maxRetries: 3,
+      createBucketIfNotExists: true //optional, if true, creates the bucket if it doesnt exist yet.
     });
     //
     // Then pass the attachments plugin with your resource
