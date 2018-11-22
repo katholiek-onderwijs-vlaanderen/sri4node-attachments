@@ -24,9 +24,75 @@ exports = module.exports = {
       security: { plugin: undefined, abilityPrepend: '' },
       maxRetries: 3,
       maximumFilesizeInMB: 10,
-      verbose: false
+      verbose: false,
+      createBucketIfNotExists: false
     };
     objectMerge(configuration, config);
+
+    checkOrCreateBucket(configuration);
+
+    async function checkOrCreateBucket(config) {
+      let exists = await checkBucket(config.s3bucket);
+      if (!exists && !config.createBucketIfNotExists) {
+        console.error("S3 Bucket " + config.s3bucket + " does not exist");
+        console.error(configuration);
+      }
+
+      if (!exists && config.createBucketIfNotExists) {
+        console.warn("Creating new bucket");
+
+        let awss3 = createAWSS3Client();
+        let params = {
+          Bucket: config.s3bucket,
+          ACL: 'private',
+          CreateBucketConfiguration: {
+            LocationConstraint: config.s3region
+          },
+        };
+
+        try {
+          await new Promise((accept, reject) => {
+            awss3.createBucket(params, function (err, data) {
+              if (err) { // an error occurred
+                console.log(err, err.stack)
+                reject(err);
+              } else {
+                //console.log(data); // successful response
+                accept(data)
+              }
+            });
+          });
+        } catch (ex) {
+          console.error('bucket creation failed');
+          console.log(ex);
+        }
+      }
+    }
+
+    async function checkBucket(bucket) {
+      debug('checking if bucket exists');
+
+      let awss3 = createAWSS3Client();
+      let params = { Bucket: bucket };
+
+      try {
+        await new Promise((accept, reject) => {
+          awss3.headBucket(params, function (err, data) {
+            if (err) { // an error occurred
+              //console.log(err)
+              reject(err);
+            } else {
+              //console.log(data); // successful response
+              accept(data)
+            }
+          });
+        });
+        return true;
+      } catch (ex) {
+        return false;
+      }
+
+    }
 
     function createAWSS3Client() {
       if (configuration.s3key && configuration.s3secret) {
@@ -40,6 +106,8 @@ exports = module.exports = {
       }
       return null;
     }
+
+
 
     function createS3Client() {
       var s3key = configuration.s3key; // eslint-disable-line
@@ -130,6 +198,8 @@ exports = module.exports = {
           debug('Upload of file [' + fromFilename + '] was successful.');
           deferred.resolve(ret);
         });
+      }).catch(function (err) {
+        deferred.reject(err);
       });
 
       return deferred.promise;
@@ -163,6 +233,8 @@ exports = module.exports = {
         } else {
           deferred.reject(404);
         }
+      }).catch(function (error) {
+        deferred.reject(404);
       });
 
       return deferred.promise;
@@ -204,15 +276,15 @@ exports = module.exports = {
       let awss3 = createAWSS3Client();
       let params = { Bucket: configuration.s3bucket, Key: file.s3filename, ACL: "bucket-owner-full-control", Body: body };
 
-      console.log(params);
+      //console.log(params);
 
       await new Promise((accept, reject) => {
         awss3.upload(params, function (err, data) {
           if (err) { // an error occurred
-            console.log(err, err.stack)
+            //console.log(err, err.stack)
             reject(err);
           } else {
-            console.log(data); // successful response
+            //console.log(data); // successful response
             accept(data)
           }
         });
@@ -294,14 +366,6 @@ exports = module.exports = {
     }
 
     return {
-      // customRouteForUpload: function () {
-      //   return {
-      //     route: '/:key/:filename',
-      //     method: 'PUT',
-      //     handler: handleFileUpload
-      //   };
-      // },
-
       customRouteForUpload: function (runAfterUpload) {
         return {
           routePostfix: '/:key/attachments',
