@@ -368,7 +368,7 @@ exports = module.exports = {
               status: 200,
               headers: [
                 ['Content-Disposition', 'inline; filename=' + sriRequest.params.filename],
-                ['Content-Type', mime.contentType(sriRequest.params.filename)] //TODO npm install npm install mime-types
+                ['Content-Type', mime.contentType(sriRequest.params.filename)]
               ]
             }
           },
