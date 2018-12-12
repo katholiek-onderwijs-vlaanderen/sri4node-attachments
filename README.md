@@ -34,9 +34,14 @@ This is sri4node-attachments 2.0 for sri4node 2.0. it hooks into busboy's stream
     ]
     ...
 
-Next you can use `PUT` on `/activities/{guid}/attachments/filename.jpg` to create and update attachments.
+Next you can use `PUT` on `/activities/{guid}/attachments/` to create and update attachments.
 Any filename can be used. The attachement is associated with `/activities/{guid}`
-And you can do `GET` on the same URL to retrieve your attachment.
+And you can do `GET` on `/activities/{guid}/attachments/filename.jpg` to retrieve your attachment.
+Each attachment that you PUT will need a BODY JSON file/string, containing at least the filename (to link the json with the file that is being uploaded) and a key. 
+It is also possible to upload 'Attachments' that do not have files, such as hyperlinks, plain text files, .... these 'attachments' will not be uploaded to s3, but will be calling the filehandler as well.
+
+### Example curl
+curl -X PUT -F "body=[{\"key\":\"80c148de-20be-4d46-87fb-5d487f7c046e\", \"file\":\"thumbsUp.png\", \"description\":\"this is MY file\"},{\"key\":\"99c148de-20be-4d46-87fb-5d487f7c046e\", \"file\":\"Screenshot.png\"},{\"key\":\"68ee79bc-0062-4e3c-b25d-5c249272202f\", \"url\":\"https://www.google.be/?gws_rd=ssl\"}]" -F "data=@thumbsUp.png" -F "data=@Screenshot.png" http://somedomain.com/activityplans/activities/0ca68464-469b-48eb-8dd4-13980d524ad0/attachments
 
 ## Configuration
 * `s3key` : Use this key to connect to S3.
@@ -78,6 +83,7 @@ you have to send the securityplugin into the configuration. the securityplugin h
 
 * `plugin`: the security plugin
 * `abilityPrepend`: a string to prepend to the ability requested. upload will use ability `create`, download will use `read` and delete will use `delete`. if you want to have separate abilities for the attachments, like `attachment_create`,`attachment_read`,... set abilityPrepend to `attachment_`.
+* `abilityAppend`: same as prepend, but append.
 
 ### Storing the attachment reference in your database
 
@@ -91,20 +97,29 @@ you have to send the securityplugin into the configuration. the securityplugin h
     ///Example of deleteFile
     ...
     const deleteFile = async function (tx, sriRequest) {
-      await createOrUpdateAttachment(tx, sriRequest.params.key, sriRequest.params.filename, true);
+      await createOrUpdateAttachment(tx, sriRequest, { file: { filename: sriRequest.params.filename } }, true);
       console.log('updated DB');
     }
     ...
     ///Example of createOrUpdateAttachment
     ...
-    async function createOrUpdateAttachment(tx, key, filename, deleted) {
-      let resource = await tx.oneOrNone('select * from "attachments" where resource = $1 and filename=$2', [key, filename]);
+    async function createOrUpdateAttachment(tx, sriRequest, file, deleted) {
+      let key = sriRequest.params.key;
+      let filename = file.file ? file.file.filename : null;
+      //name, url, contenttype, description
+      let contentType = null;
+      if (file.file)
+        contentType = file.contentType ? file.contentType : file.file.mimetype;
+    
+      let resource = await tx.oneOrNone('select * from "attachments" where resource = $1 and key = $2', [key, file.key]);
     
       if (resource) {
-        //update existing
-        await tx.any('update "attachments" set "$$meta.modified" = current_timestamp, "$$meta.deleted" = $3 where resource = $1 and filename=$2', [key, filename, deleted]);
+        //update existing (including deleted flag)
+        await tx.any('update "attachments" set "$$meta.modified" = current_timestamp, "$$meta.deleted" = $2, name=$3, url=$4, "contentType"=$5, description=$6 where key = $1', [resource.key, deleted, file.name, file.url, contentType, file.description]);
       } else if (!deleted) {
-        await tx.none('insert into "attachments" (key, resource, filename) values($1,$2,$3)', [uuid(), key, filename]);
+        //no resource yet.
+    
+        await tx.none('insert into "attachments" (key, resource, filename, name, url, "contentType", description) values($1,$2,$3,$4,$5,$6,$7)', [file.key, key, filename, file.name, file.url, contentType, file.description]);
       }
     }
     ...
@@ -113,8 +128,12 @@ you have to send the securityplugin into the configuration. the securityplugin h
     
     CREATE TABLE "attachments" (
         key uuid primary key,
-        "filename" text not null,
-    	"resource" uuid REFERENCES "activities" (key),
+        "filename" text,
+    	"resource" uuid REFERENCES "activities" (key) DEFERRABLE INITIALLY IMMEDIATE,
+    	"name" text,
+    	"description" text,
+    	"url" text,
+    	"contentType" text,
     
         "$$meta.deleted" boolean default false,
         "$$meta.modified" timestamp with time zone not null default current_timestamp,
@@ -127,18 +146,41 @@ you have to send the securityplugin into the configuration. the securityplugin h
     ...
     
     ...
+    function makeAttJson(att, element) {
+      let json = {};
+      if (att.filename) {
+        json.href = element.stored.$$meta.permalink + "/attachments/" + att.filename;
+      } else {
+        json.url = att.url;
+      }
+      json.key = att.key;
+    
+      json.contentType = att.contentType;
+      json.description = att.description;
+    
+      return json;
+    }
+    
     async function addAttachments(tx, sriReq, elements) {
       for (let element of elements) {
-        let attachments = await tx.any('select * from "attachments" where resource = $1 and "$$meta.deleted" = false', [element.stored.key]);
-        element.stored.$$attachments = []
-        attachments.forEach(atta => {
-          element.stored.$$attachments.push({ href: element.stored.$$meta.permalink + "/attachments/" + atta.filename })
-        })
+        if (element.stored) {
+          let attachments = await tx.any('select * from "attachments" where resource = $1 and "$$meta.deleted" = false', [element.stored.key]);
+          element.stored.$$attachments = []
+          attachments.forEach(atta => {
+            element.stored.$$attachments.push(makeAttJson(atta, element))
+          })
+        }
       }
     }
     ...
     
-    
+### Things to note
+
+* Filenames have to be unique per resource. This means `/resource/guid/attachments/file1.jpg` can only contain one file1.jpg. It is possible to overwrite the file by sending file1.jpg to `/resource/guid/attachments/` but it must be accompanied by the same key. If not, an error is thrown.
+* the `file` object passed to the callback function that runs for every uploaded file, is the JSON object that was sent for that file. `file.file` (that originally contained the filename) will be overwritten and contain the actual file itself (including filename, data, ...). 
+* the passed `file` will also contain a `mimetype`.
+* `/resource/guid/attachments/` can be seen as a batch, as multiple attachments (BODY json array) and data files can be uploaded at once.
+* the `routePostfix` for the download and delete are regexed to only fire on filenames. You are free to add extra routes like  `/:key/attachments/:attachmentkey` if you want to handle showing a json file on that route for an attachment. 
     
 ### TODO
 * update the tests
