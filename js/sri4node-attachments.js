@@ -371,7 +371,11 @@ exports = module.exports = {
     async function checkSecurity(tx, sriRequest, ability) {
       if (configuration.security.plugin) {
         let security = configuration.security.plugin;
-        let attAbility = configuration.security.abilityPrepend + ability + configuration.security.abilityAppend;
+        let attAbility = ability;
+        if (configuration.security.abilityPrepend)
+          attAbility = configuration.security.abilityPrepend + attAbility;
+        if (configuration.security.abilityAppend)
+          attAbility = attAbility + configuration.security.abilityAppend;
         let permaResource = [sriRequest.sriType + '/' + sriRequest.params.key];
         return await security.checkPermissionOnResourceList(tx, sriRequest, attAbility, permaResource);
       }
