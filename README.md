@@ -113,7 +113,19 @@ you have to send the securityplugin into the configuration. the securityplugin h
     
       let resource = await tx.oneOrNone('select * from "attachments" where resource = $1 and key = $2', [key, file.key]);
     
-      if (resource) {
+        if (resource) {
+          ///validate that filename did not change for the same key.
+          if (resource.filename !== filename) {
+            throw new sriRequest.SriError({
+              status: 409,
+              errors: [{
+                code: 'filename.mismatch',
+                type: 'ERROR',
+                message: 'The existing attachment (' + resource.filename + ') can only be replaced with a file with the same name. (not:' + filename + ' )'
+              }]
+            })
+          }
+          
         //update existing (including deleted flag)
         await tx.any('update "attachments" set "$$meta.modified" = current_timestamp, "$$meta.deleted" = $2, name=$3, url=$4, "contentType"=$5, description=$6 where key = $1', [resource.key, deleted, file.name, file.url, contentType, file.description]);
       } else if (!deleted) {
@@ -181,6 +193,7 @@ you have to send the securityplugin into the configuration. the securityplugin h
 * the passed `file` will also contain a `mimetype`.
 * `/resource/guid/attachments/` can be seen as a batch, as multiple attachments (BODY json array) and data files can be uploaded at once.
 * the `routePostfix` for the download and delete are regexed to only fire on filenames. You are free to add extra routes like  `/:key/attachments/:attachmentkey` if you want to handle showing a json file on that route for an attachment. 
+* you can throw errors in your afterUpload function. This will rollback all filechanges in the batch. 
     
 ### TODO
 * update the tests

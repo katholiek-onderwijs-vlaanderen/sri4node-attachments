@@ -482,7 +482,7 @@ exports = module.exports = {
 
             let uploads = [];
             let renames = [];
-            let failed = false;
+            let failed = [];
 
             const handleTheFile = async function (att) {
               if (att.file)
@@ -525,7 +525,7 @@ exports = module.exports = {
                 .catch((ex) => {
                   console.log("handlefile failed");
                   console.log(ex);
-                  failed = true;
+                  failed.push(ex);
                 })
               );
 
@@ -536,7 +536,7 @@ exports = module.exports = {
 
             ///all files are now uploaded into their TMP versions.
 
-            if (failed == true) {
+            if (failed.length > 0) {
               ///delete attachments again
               console.log("something went wrong during upload/afterupload");
               let s3client = createS3Client(configuration);
@@ -553,7 +553,7 @@ exports = module.exports = {
                 }
               }
 
-              stream.push('FAIL');
+              stream.push(failed);
             } else {
               /// all went well, rename the files to their real names now.
               bodyJson.filter(e => e.file !== undefined).forEach(file => {
