@@ -5,6 +5,7 @@ Currently supports storing attachments on Amazon S3.
 This is sri4node-attachments 2.0 for sri4node 2.0. it hooks into busboy's streaming handlers from sri4node
 
 ## Example
+The examples below are assumed from am `/activities` API
 
     // First configure the module
     //
@@ -23,25 +24,116 @@ This is sri4node-attachments 2.0 for sri4node 2.0. it hooks into busboy's stream
     resources: [
         require('./resources/activities.js')(attachments),
     ]
+    
+    //
+    //Signatures of the callback/handler functions
+    //
+    const uploadFile = async function (tx, sriRequest, file) {
+      ...
+    }
+    
+    const getFileName = async function (tx, sriRequest, resourceKey, attachmentKey) {
+      let resource = .....
+    
+      return resource.filename;
+    }
+    
+    const deleteFile = async function (tx, sriRequest, resourceKey, attachmentKey) {
+    ...
+    }
+    
+    const getAttJson = async function (tx, sriRequest, resourceKey, attachmentKey) {
+    ....
+      return json;
+    }
+        
     //
     // In your sri4node resource configuration
     //
     ...
     customRoutes: [
-      attachments.customRouteForUpload(uploadFile), //uploadFile is a function that will be called ONCE FOR EACH FILE that has been uploaded on s3.
+      attachments.customRouteForUpload(uploadFile),  //uploadFile is a function that will be called ONCE FOR EACH FILE that has been uploaded on s3.
       attachments.customRouteForDownload(),
-      attachments.customRouteForDelete(deleteFile), //deleteFile is a function that will be called once the file is deleted on s3
+      attachments.customRouteForDelete(getFileName, deleteFile),  //getFileName is a function that is called to retreive the filename from the database. deleteFile is a function that will be called once the file is deleted on s3
+      attachments.customRouteForGet(getAttJson) //getAttJson is a function that gets the JSON of an attachment resource.
     ]
     ...
 
-Next you can use `PUT` on `/activities/{guid}/attachments/` to create and update attachments.
+
+
+Next you can use `POST` on `/activities/attachments/` to create and update attachments.
 Any filename can be used. The attachement is associated with `/activities/{guid}`
-And you can do `GET` on `/activities/{guid}/attachments/filename.jpg` to retrieve your attachment.
-Each attachment that you PUT will need a BODY JSON file/string, containing at least the filename (to link the json with the file that is being uploaded) and a key. 
+And you can do `GET` on `/activities/{guid}/attachments/filename.jpg` to retrieve/download your attachment.
+Each attachment that you POST will need a BODY JSON file/string, containing at least the filename (to link the json with the file that is being uploaded) and a key. 
 It is also possible to upload 'Attachments' that do not have files, such as hyperlinks, plain text files, .... these 'attachments' will not be uploaded to s3, but will be calling the filehandler as well.
+The /attachments POST handler should be seen as a batch operation with a transaction. If anything fails, everything will be undone.
+
+It is possible to upload multiple files. It is also possible to upload one single file to multiple resources at once.
+
+### Example JSON
+
+    [
+      {
+        "file": "thumbsUp.1.png",
+        "attachment": {
+          "key": "19f50272-8438-4662-9386-5fc789420262",
+          "description": "this is MY file"
+        },
+        "resource": {
+          "href": "/activityplans/activities/43a651b0-e4a6-4fed-8102-a6f67d82a78b"
+        }
+      },
+      {
+        "file": "thumbsUp.2.png",
+        "attachment": {
+          "key": "11b9160c-ef51-4536-b97d-8e88bacf7568"
+        },
+        "resource": {
+          "href": "/activityplans/activities/43a651b0-e4a6-4fed-8102-a6f67d82a78b"
+        }
+      },
+      {
+        "resource": {
+          "href": "/activityplans/activities/43a651b0-e4a6-4fed-8102-a6f67d82a78b"
+        },
+        "attachment": {
+          "key": "14f54569-645a-4916-894a-23187ecc179c",
+          "href": "https://www.google.be/?gws_rd=ssl"
+        }
+      },
+      {
+        "file": "thumbsUp.1.png",
+        "attachment": {
+          "key": "449418b6-aa9a-4205-be52-b57636f8f042",
+          "description": "this is MY file"
+        },
+        "resource": {
+          "href": "/activityplans/activities/2740a9d9-fe4a-413e-b5c8-46b8327ed61f"
+        }
+      },
+      {
+        "file": "thumbsUp.2.png",
+        "attachment": {
+          "key": "79bce533-03bf-4a8c-b492-f84bf755ee84"
+        },
+        "resource": {
+          "href": "/activityplans/activities/2740a9d9-fe4a-413e-b5c8-46b8327ed61f"
+        }
+      },
+      {
+        "resource": {
+          "href": "/activityplans/activities/2740a9d9-fe4a-413e-b5c8-46b8327ed61f"
+        },
+        "attachment": {
+          "key": "807333b2-97ec-4260-a9ad-c1615b30d923",
+          "href": "https://www.google.be/?gws_rd=ssl"
+        }
+      }
+    ]
 
 ### Example curl
-curl -X PUT -F "body=[{\"key\":\"80c148de-20be-4d46-87fb-5d487f7c046e\", \"file\":\"thumbsUp.png\", \"description\":\"this is MY file\"},{\"key\":\"99c148de-20be-4d46-87fb-5d487f7c046e\", \"file\":\"Screenshot.png\"},{\"key\":\"68ee79bc-0062-4e3c-b25d-5c249272202f\", \"url\":\"https://www.google.be/?gws_rd=ssl\"}]" -F "data=@thumbsUp.png" -F "data=@Screenshot.png" http://somedomain.com/activityplans/activities/0ca68464-469b-48eb-8dd4-13980d524ad0/attachments
+
+curl -X POST -F "body=[{\"file\":\"thumbsUp.1.png\",\"attachment\":{\"key\":\"19f50272-8438-4662-9386-5fc789420262\",\"description\":\"this is MY file\"},\"resource\":{\"href\":\"/activityplans/activities/43a651b0-e4a6-4fed-8102-a6f67d82a78b\"}},{\"file\":\"thumbsUp.2.png\",\"attachment\":{\"key\":\"11b9160c-ef51-4536-b97d-8e88bacf7568\"},\"resource\":{\"href\":\"/activityplans/activities/43a651b0-e4a6-4fed-8102-a6f67d82a78b\"}},{\"resource\":{\"href\":\"/activityplans/activities/43a651b0-e4a6-4fed-8102-a6f67d82a78b\"},\"attachment\":{\"key\":\"14f54569-645a-4916-894a-23187ecc179c\",\"href\":\"https://www.google.be/?gws_rd=ssl\"}},{\"file\":\"thumbsUp.1.png\",\"attachment\":{\"key\":\"449418b6-aa9a-4205-be52-b57636f8f042\",\"description\":\"this is MY file\"},\"resource\":{\"href\":\"/activityplans/activities/2740a9d9-fe4a-413e-b5c8-46b8327ed61f\"}},{\"file\":\"thumbsUp.2.png\",\"attachment\":{\"key\":\"79bce533-03bf-4a8c-b492-f84bf755ee84\"},\"resource\":{\"href\":\"/activityplans/activities/2740a9d9-fe4a-413e-b5c8-46b8327ed61f\"}},{\"resource\":{\"href\":\"/activityplans/activities/2740a9d9-fe4a-413e-b5c8-46b8327ed61f\"},\"attachment\":{\"key\":\"807333b2-97ec-4260-a9ad-c1615b30d923\",\"href\":\"https://www.google.be/?gws_rd=ssl\"}}]" -F "data=@thumbsUp.1.png" -F "data=@thumbsUp.2.png"  http://yourserver.com/activities/attachments
 
 ## Configuration
 * `s3key` : Use this key to connect to S3.
@@ -55,9 +147,10 @@ You can add custom handlers in the routes that are handling your attachments :
 
     ...
     customroutes: [
-      attachments.customRouteForUpload(uploadFile), //uploadFile is a function that will be called ONCE FOR EACH FILE that has been uploaded on s3.
+      attachments.customRouteForUpload(uploadFile),  //uploadFile is a function that will be called ONCE FOR EACH FILE that has been uploaded on s3.
       attachments.customRouteForDownload(),
-      attachments.customRouteForDelete(deleteFile), //deleteFile is a function that will be called once the file is deleted on s3
+      attachments.customRouteForDelete(getFileName, deleteFile),  //getFileName is a function that is called to retreive the filename from the database. deleteFile is a function that will be called once the file is deleted on s3
+      attachments.customRouteForGet(getAttJson) //getAttJson is a function that gets the JSON of an attachment resource.
     ]
     ...
     
