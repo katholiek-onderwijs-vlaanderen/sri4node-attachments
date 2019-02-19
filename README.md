@@ -168,7 +168,8 @@ This plugin works together with the sri4node-security-api plugin
       s3region: 'eu-central-1',
       security: {
         plugin: securityPlugin,
-        abilityPrepend: ''
+        abilityPrepend: '',
+        abilityAppend: ''
       }
     });
     
@@ -179,52 +180,70 @@ you have to send the securityplugin into the configuration. the securityplugin h
 * `abilityAppend`: same as prepend, but append.
 
 ### Storing the attachment reference in your database
-
-    ///Example of uploadFile
-    ...
+    
     const uploadFile = async function (tx, sriRequest, file) {
-      await createOrUpdateAttachment(tx, sriRequest.params.key, file.filename, false);
-      console.log('updated DB');
+      await createOrUpdateAttachment(tx, sriRequest, file, false);
     }
-    ...
-    ///Example of deleteFile
-    ...
-    const deleteFile = async function (tx, sriRequest) {
-      await createOrUpdateAttachment(tx, sriRequest, { file: { filename: sriRequest.params.filename } }, true);
-      console.log('updated DB');
+    
+    const deleteFile = async function (tx, sriRequest, resourceKey, attachmentKey) {
+      await createOrUpdateAttachment(tx, sriRequest, { resource: { key: resourceKey }, attachment: { key: attachmentKey } }, true);
     }
-    ...
+    
+    const getFileName = async function (tx, sriRequest, resourceKey, attachmentKey) {
+      let resource = await tx.one('select * from "attachments" where resource = $1 and key = $2', [resourceKey, attachmentKey]);
+    
+      return resource.filename;
+    }
+    
+    const getAttJson = async function (tx, sriRequest, resourceKey, attachmentKey) {
+      let att = await tx.one('select * from "attachments" where resource = $1 and key = $2', [resourceKey, attachmentKey]);
+    
+      return makeAttJson(att, path + '/' + resourceKey);
+    }
+    
     ///Example of createOrUpdateAttachment
     ...
     async function createOrUpdateAttachment(tx, sriRequest, file, deleted) {
-      let key = sriRequest.params.key;
+      let key = file.resource.key;
       let filename = file.file ? file.file.filename : null;
       //name, url, contenttype, description
       let contentType = null;
       if (file.file)
         contentType = file.contentType ? file.contentType : file.file.mimetype;
     
-      let resource = await tx.oneOrNone('select * from "attachments" where resource = $1 and key = $2', [key, file.key]);
+      let activity = await tx.oneOrNone('select key from activities where key=$1', [key]); //validates the parent exists NO.
     
-        if (resource) {
-          ///validate that filename did not change for the same key.
-          if (resource.filename !== filename) {
-            throw new sriRequest.SriError({
-              status: 409,
-              errors: [{
-                code: 'filename.mismatch',
-                type: 'ERROR',
-                message: 'The existing attachment (' + resource.filename + ') can only be replaced with a file with the same name. (not:' + filename + ' )'
-              }]
-            })
-          }
-          
+      if (!activity) {
+        throw new sriRequest.SriError({
+          status: 409,
+          errors: [{
+            code: 'attachment.parent.missing',
+            type: 'ERROR',
+            message: 'The parent resource with key ' + key + ' does not exist.'
+          }]
+        })
+      }
+    
+      let resource = await tx.oneOrNone('select * from "attachments" where resource = $1 and key = $2', [key, file.attachment.key]);
+    
+      if (resource) {
+        if (resource.filename !== filename && !deleted) {
+          throw new sriRequest.SriError({
+            status: 409,
+            errors: [{
+              code: 'filename.mismatch',
+              type: 'ERROR',
+              message: 'The existing attachment (' + resource.filename + ') can only be replaced with a file with the same name. (not:' + filename + ' )'
+            }]
+          })
+        }
+    
         //update existing (including deleted flag)
-        await tx.any('update "attachments" set "$$meta.modified" = current_timestamp, "$$meta.deleted" = $2, name=$3, url=$4, "contentType"=$5, description=$6 where key = $1', [resource.key, deleted, file.name, file.url, contentType, file.description]);
+        await tx.any('update "attachments" set "$$meta.modified" = current_timestamp, "$$meta.deleted" = $2, name=$3, url=$4, "contentType"=$5, description=$6 where key = $1', [resource.key, deleted, file.attachment.name, file.attachment.href, contentType, file.attachment.description]);
       } else if (!deleted) {
         //no resource yet.
     
-        await tx.none('insert into "attachments" (key, resource, filename, name, url, "contentType", description) values($1,$2,$3,$4,$5,$6,$7)', [file.key, key, filename, file.name, file.url, contentType, file.description]);
+        await tx.none('insert into "attachments" (key, resource, filename, name, url, "contentType", description) values($1,$2,$3,$4,$5,$6,$7)', [file.attachment.key, key, filename, file.attachment.name, file.attachment.href, contentType, file.attachment.description]);
       }
     }
     ...
@@ -256,7 +275,7 @@ you have to send the securityplugin into the configuration. the securityplugin h
       if (att.filename) {
         json.href = element.stored.$$meta.permalink + "/attachments/" + att.filename;
       } else {
-        json.url = att.url;
+        json.href = att.url;
       }
       json.key = att.key;
     
