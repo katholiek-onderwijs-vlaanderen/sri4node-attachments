@@ -620,7 +620,7 @@ exports = module.exports = {
 
       customRouteForDownload: function () {
         return {
-          routePostfix: '/:key/attachments/:filename([^/]*\.[A-Za-z]{1,})',
+          routePostfix: '/:key/attachments/:filename([^/]*\.[A-Za-z0-9]{1,})',
 
           httpMethods: ['GET'],
           binaryStream: true,
