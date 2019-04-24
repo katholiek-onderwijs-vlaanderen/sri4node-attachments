@@ -13,6 +13,7 @@
     "mime-types": "^2.1.21",
     "q": "^1.0.1",
     "s3": "4.4.x",
+    "tmp-promise": "^1.0.5",
     "uuid": "2.0.x"
   },
   "devDependencies": {

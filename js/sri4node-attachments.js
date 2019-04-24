@@ -10,6 +10,8 @@ const streams = require('memory-streams');
 const pEvent = require('p-event');
 const S3 = require('aws-sdk/clients/s3');
 const mime = require('mime-types');
+const tmp = require('tmp-promise');
+const fs = require('fs');
 
 exports = module.exports = {
   configure: function (config) {
@@ -284,7 +286,15 @@ exports = module.exports = {
     async function handleFileUpload(fileWithJson, sriRequest) {
 
       let file = fileWithJson.file;
-      let body = file.buffer ? file.buffer : file.writer.toBuffer();
+      
+      
+      let body = await new Promise((resolve, reject) => {
+        fs.readFile(file.tmpFile.path, (err, data) => {
+          if (err) throw err;
+          resolve(data);
+        });
+      });
+
       let awss3 = createAWSS3Client();
 
       let tmpFileName = getTmpFilename(getS3FileName(sriRequest, fileWithJson));
@@ -302,6 +312,7 @@ exports = module.exports = {
           }
         });
       });
+
 
     }
 
@@ -383,6 +394,35 @@ exports = module.exports = {
     }
 
 
+
+    async function getPreSigned() {
+      debug('getting presigned post for s3');
+
+      let awss3 = createAWSS3Client();
+
+      let params = {
+        Bucket: configuration.s3bucket,
+        Conditions: [['starts-with', '$key', 'tmp']]
+      };
+
+      return await new Promise((accept, reject) => {
+        awss3.createPresignedPost(params, function (err, data) {
+          if (err) { // an error occurred
+            //console.log(err, err.stack)
+            console.error('Presigning post data encountered an error', err);
+            reject(err);
+          } else {
+            //console.log(data); // successful response
+            console.log('The post data is', data);
+            accept(data)
+          }
+        });
+      });
+
+
+    }
+
+
     async function checkSecurity(tx, sriRequest, bodyJson, ability) {
       let resources = new Set();
       if (bodyJson) {
@@ -437,7 +477,10 @@ exports = module.exports = {
                 console.log('File [' + fieldname + ']: filename: ' + filename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
 
                 let fileObj = ({ filename, mimetype, file, fields: {} });
-                fileObj.writer = new streams.WritableStream();
+
+                fileObj.tmpFile = await tmp.file();
+                fileObj.writer = fs.createWriteStream(null, { fd: fileObj.tmpFile.fd });
+
 
                 file.on('data', async function (data) {
                   //console.log('File [' + fieldname + '] got ' + data.length + ' bytes');
@@ -455,7 +498,7 @@ exports = module.exports = {
 
 
             // wait until busboy is done
-            await pEvent(sriRequest.busBoy, 'finish')
+            await pEvent(sriRequest.busBoy, 'finish');
             console.log('busBoy is done'); //, sriRequest.attachmentsRcvd)
 
             let bodyJson = sriRequest.fieldsRcvd.body;
@@ -468,7 +511,7 @@ exports = module.exports = {
                   type: 'ERROR',
                   message: 'Body is required.'
                 }]
-              })
+              });
             } else {
               bodyJson = JSON.parse(bodyJson);
               if (!Array.isArray(bodyJson))
@@ -611,10 +654,26 @@ exports = module.exports = {
 
               stream.push('OK');
             }
-
-
           }
         }
+      },
+
+      customRouteForPreSignedUpload: function () {
+        return {
+          routePostfix: '/attachments/presigned',
+          httpMethods: ['GET'],
+          beforeHandler: async(tx, sriRequest) => {
+            // await checkSecurity(tx, sriRequest, null, 'create');
+          },
+          handler: async(tx, sriRequest) => {
+            ///dp the presigned request to s3
+            let json = await getPreSigned();
+            return {
+              body: json,
+              status: 200
+            }
+          }
+        };
       },
 
 
@@ -628,7 +687,7 @@ exports = module.exports = {
             await checkSecurity(tx, sriRequest, null, 'read');
             console.log(sriRequest.params.filename);
 
-            let contentType = 'application/octet-stream'
+            let contentType = 'application/octet-stream';
 
             if (mime.contentType(sriRequest.params.filename))
               contentType = mime.contentType(sriRequest.params.filename);
