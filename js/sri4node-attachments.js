@@ -308,6 +308,7 @@ exports = module.exports = {
             reject(err);
           } else {
             //console.log(data); // successful response
+            file.tmpFile.cleanup();
             accept(data)
           }
         });
