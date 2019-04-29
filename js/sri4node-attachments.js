@@ -286,14 +286,9 @@ exports = module.exports = {
     async function handleFileUpload(fileWithJson, sriRequest) {
 
       let file = fileWithJson.file;
-      
-      
-      let body = await new Promise((resolve, reject) => {
-        fs.readFile(file.tmpFile.path, (err, data) => {
-          if (err) throw err;
-          resolve(data);
-        });
-      });
+
+
+      let body = fs.createReadStream(file.tmpFile.path);
 
       let awss3 = createAWSS3Client();
 
@@ -483,11 +478,15 @@ exports = module.exports = {
                 fileObj.writer = fs.createWriteStream(null, { fd: fileObj.tmpFile.fd });
 
 
-                file.on('data', async function (data) {
-                  //console.log('File [' + fieldname + '] got ' + data.length + ' bytes');
-                  //write to buffer
-                  fileObj.writer.write(data);
-                });
+                file.pipe(fileObj.writer);
+
+                // file.on('data', async function (data) {
+                //   //console.log('File [' + fieldname + '] got ' + data.length + ' bytes');
+                //   //write to buffer
+                //   fileObj.writer.write(data);
+                // });
+
+
                 sriRequest.attachmentsRcvd.push(fileObj);
               });
 
