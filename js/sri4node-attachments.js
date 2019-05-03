@@ -10,8 +10,6 @@ const streams = require('memory-streams');
 const pEvent = require('p-event');
 const S3 = require('aws-sdk/clients/s3');
 const mime = require('mime-types');
-const tmp = require('tmp-promise');
-const fs = require('fs');
 
 exports = module.exports = {
   configure: function (config) {
@@ -255,17 +253,17 @@ exports = module.exports = {
     }
 
     function getTmpFilename(filename) {
-      return filename + '.tmp';
+      return (new Date().getTime()) + '-' + filename + '.tmp';
     }
 
 
     async function renameFile(fileWithJson) {
       let file = fileWithJson.file;
       let s3filename = getS3FileName(null, fileWithJson);
-      let tmpFileName = getTmpFilename(s3filename);
+      let tmpFileName = file.tmpFileName;
       debug('Rename ' + tmpFileName + ' to ' + s3filename);
       let awss3 = createAWSS3Client();
-      let params = { Bucket: configuration.s3bucket, Key: s3filename, ACL: "bucket-owner-full-control", CopySource: encodeURI("/" + configuration.s3bucket + "/" + tmpFileName), MetadataDirective: "COPY", TaggingDirective: "COPY" }; //Metadata: { "attachmentkey": fileWithJson.key },
+      let params = { Bucket: configuration.s3bucket, Key: s3filename, ACL: "bucket-owner-full-control", CopySource: encodeURI("/" + configuration.s3bucket + "/" + tmpFileName), MetadataDirective: "REPLACE", TaggingDirective: "COPY", Metadata: { "attachmentkey": fileWithJson.attachment.key } };
 
       await new Promise((accept, reject) => {
         awss3.copyObject(params, function (err, data) {
@@ -283,18 +281,12 @@ exports = module.exports = {
 
     }
 
-    async function handleFileUpload(fileWithJson, sriRequest) {
-
-      let file = fileWithJson.file;
-
-
-      let body = fs.createReadStream(file.tmpFile.path);
+    async function handleFileUpload(fileStream, tmpFileName) {
 
       let awss3 = createAWSS3Client();
 
-      let tmpFileName = getTmpFilename(getS3FileName(sriRequest, fileWithJson));
       debug('Uploading file ' + tmpFileName);
-      let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: body, Metadata: { "attachmentkey": fileWithJson.attachment.key } };
+      let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: fileStream }; //, Metadata: { "attachmentkey": fileWithJson.attachment.key }
 
       await new Promise((accept, reject) => {
         awss3.upload(params, function (err, data) {
@@ -303,12 +295,11 @@ exports = module.exports = {
             reject(err);
           } else {
             //console.log(data); // successful response
-            file.tmpFile.cleanup();
+            // file.tmpFile.cleanup();
             accept(data)
           }
         });
       });
-
 
     }
 
@@ -466,6 +457,14 @@ exports = module.exports = {
             sriRequest.attachmentsRcvd = [];
             sriRequest.fieldsRcvd = {};
 
+            let tmpUploads = [];
+            let failed = [];
+
+            const uploadTmpFile = async function (fileObj) {
+              await handleFileUpload(fileObj.file, fileObj.tmpFileName);
+              console.log("upload to s3 done for " + fileObj.tmpFileName);
+              return fileObj;
+            };
 
             sriRequest.busBoy.on('file',
               async function (fieldname, file, filename, encoding, mimetype) {
@@ -474,11 +473,18 @@ exports = module.exports = {
 
                 let fileObj = ({ filename, mimetype, file, fields: {} });
 
-                fileObj.tmpFile = await tmp.file();
-                fileObj.writer = fs.createWriteStream(null, { fd: fileObj.tmpFile.fd });
-
-
-                file.pipe(fileObj.writer);
+                fileObj.tmpFileName = getTmpFilename(filename);
+                // fileObj.writer = fs.createWriteStream(null, { fd: fileObj.tmpFile.fd });
+                // file.pipe(fileObj.writer);
+                tmpUploads.push(
+                  uploadTmpFile(fileObj)
+                  .then((suc) => {})
+                  .catch((ex) => {
+                    console.log("uploadTmpFile failed");
+                    console.log(ex);
+                    failed.push(ex);
+                  })
+                );
 
                 // file.on('data', async function (data) {
                 //   //console.log('File [' + fieldname + '] got ' + data.length + ' bytes');
@@ -501,6 +507,9 @@ exports = module.exports = {
             await pEvent(sriRequest.busBoy, 'finish');
             console.log('busBoy is done'); //, sriRequest.attachmentsRcvd)
 
+            await Promise.all(tmpUploads);
+            console.log("tmp uploads done");
+
             let bodyJson = sriRequest.fieldsRcvd.body;
 
             if (bodyJson === undefined) {
@@ -518,117 +527,125 @@ exports = module.exports = {
                 bodyJson = [bodyJson];
             }
 
+
+            let securityError;
+            let uploads = [];
+            let renames = [];
             ///now that we validated the json body resource requirement, we can finally check security.....
-            await checkSecurity(tx, sriRequest, bodyJson, 'create');
-
-
-            if (bodyJson.some(e => !e.attachment)) {
-              throw new sriRequest.SriError({
-                status: 409,
-                errors: [{
-                  code: 'missing.json.body.attachment',
-                  type: 'ERROR',
-                  message: 'each json item needs an "attachment"'
-                }]
-              });
+            try {
+              await checkSecurity(tx, sriRequest, bodyJson, 'create');
+            } catch (error) {
+              securityError = error;
             }
 
+            if (!securityError) {
 
-            if (bodyJson.some(e => !e.attachment.key)) {
-              throw new sriRequest.SriError({
-                status: 409,
-                errors: [{
-                  code: 'missing.json.attachment.key',
-                  type: 'ERROR',
-                  message: 'each attachment json needs a key'
-                }]
-              });
-            }
-
-            sriRequest.attachmentsRcvd.forEach(file => checkBodyJson(file, bodyJson, sriRequest));
-
-            sriRequest.attachmentsRcvd.forEach(file => file.mimetype = mime.contentType(file.filename));
-            bodyJson.forEach(att => {
-
-              if (!att.resource || !att.resource.href) {
+              if (bodyJson.some(e => !e.attachment)) {
                 throw new sriRequest.SriError({
                   status: 409,
                   errors: [{
-                    code: 'missing.json.body.resource',
+                    code: 'missing.json.body.attachment',
                     type: 'ERROR',
-                    message: 'each attachment json needs a resource'
-                  }]
+                    message: 'each json item needs an "attachment"'
+                }]
                 });
-              } else {
-                let chuncks = att.resource.href.split("/");
-                att.resource.key = chuncks[chuncks.length - 1];
               }
-            });
 
-            let uploads = [];
-            let renames = [];
-            let failed = [];
 
-            const handleTheFile = async function (att) {
-              if (att.file)
-                await handleFileUpload(att, sriRequest);
-              await runAfterUpload(tx, sriRequest, att);
-              // throw "damn";
-              return att;
-            };
+              if (bodyJson.some(e => !e.attachment.key)) {
+                throw new sriRequest.SriError({
+                  status: 409,
+                  errors: [{
+                    code: 'missing.json.attachment.key',
+                    type: 'ERROR',
+                    message: 'each attachment json needs a key'
+                }]
+                });
+              }
 
-            //validate JSONs for each of the files
-            bodyJson.forEach(att => {
-              if (att.file !== undefined) {
-                // console.log(att.file);
-                att.file = sriRequest.attachmentsRcvd.find(attf => attf.filename === att.file);
+              sriRequest.attachmentsRcvd.forEach(file => checkBodyJson(file, bodyJson, sriRequest));
 
-                if (att.file === undefined) {
+              sriRequest.attachmentsRcvd.forEach(file => file.mimetype = mime.contentType(file.filename));
+
+              bodyJson.forEach(att => {
+                if (!att.resource || !att.resource.href) {
                   throw new sriRequest.SriError({
                     status: 409,
                     errors: [{
-                      code: 'missing.file',
+                      code: 'missing.json.body.resource',
                       type: 'ERROR',
-                      message: 'file ' + att.file + ' was expected but not found'
-                    }]
+                      message: 'each attachment json needs a resource'
+                  }]
                   });
+                } else {
+                  let chuncks = att.resource.href.split("/");
+                  att.resource.key = chuncks[chuncks.length - 1];
                 }
-                // else {
-                //   att.file.s3filename = getS3FileName(sriRequest, att);
-                // }
-              }
-
-            });
-
-            await checkExistance(bodyJson.filter(e => e.file !== undefined), sriRequest);
-
-            ///add uploads to the queue
-            bodyJson.forEach(file => {
-              uploads.push(
-                handleTheFile(file)
-                .then((suc) => {
-                  debug("handleFile success");
-                })
-                .catch((ex) => {
-                  console.log("handlefile failed");
-                  console.log(ex);
-                  failed.push(ex);
-                })
-              );
-
-            });
+              });
 
 
-            await Promise.all(uploads);
 
+
+              const handleTheFile = async function (att) {
+                // if (att.file)
+                //   await handleFileUpload(att, sriRequest);
+                await runAfterUpload(tx, sriRequest, att);
+                //throw "damn";
+                return att;
+              };
+
+              //validate JSONs for each of the files
+              bodyJson.forEach(att => {
+                if (att.file !== undefined) {
+                  // console.log(att.file);
+                  att.file = sriRequest.attachmentsRcvd.find(attf => attf.filename === att.file);
+
+                  if (att.file === undefined) {
+                    throw new sriRequest.SriError({
+                      status: 409,
+                      errors: [{
+                        code: 'missing.file',
+                        type: 'ERROR',
+                        message: 'file ' + att.file + ' was expected but not found'
+                    }]
+                    });
+                  }
+                  // else {
+                  //   att.file.s3filename = getS3FileName(sriRequest, att);
+                  // }
+                }
+
+              });
+
+              await checkExistance(bodyJson.filter(e => e.file !== undefined), sriRequest);
+
+              ///add uploads to the queue
+              bodyJson.forEach(file => {
+                uploads.push(
+                  handleTheFile(file)
+                  .then((suc) => {
+                    debug("handleFile success");
+                  })
+                  .catch((ex) => {
+                    console.log("handlefile failed");
+                    console.log(ex);
+                    failed.push(ex);
+                  })
+                );
+
+              });
+
+
+              await Promise.all(uploads);
+            }
             ///all files are now uploaded into their TMP versions.
 
-            if (failed.length > 0) {
+            if (failed.length > 0 || securityError) { ///something failed. delete all tmp files
               ///delete attachments again
               console.log("something went wrong during upload/afterupload");
               let s3client = createS3Client(configuration);
 
-              let filenames = sriRequest.attachmentsRcvd.filter(e => e.s3filename).map(e => getTmpFilename(e.s3filename));
+              let filenames = sriRequest.attachmentsRcvd.filter(e => e.tmpFileName).map(e => e.tmpFileName);
 
               if (filenames.length) {
                 try {
@@ -640,7 +657,10 @@ exports = module.exports = {
                 }
               }
 
-              stream.push(failed);
+              if (securityError) throw securityError;
+
+              throw failed;
+              //stream.push(failed);
             } else {
               /// all went well, rename the files to their real names now.
               bodyJson.filter(e => e.file !== undefined).forEach(file => {
