@@ -321,7 +321,7 @@ exports = module.exports = {
       } else if (filename) {
         name = sriRequest.params.key + '-' + filename; //get name from the DB(the getFileName fn) for delete
       } else {
-        name = sriRequest.params.key + '-' + encodeURI(sriRequest.params.filename); //get name from params for download.
+        name = sriRequest.params.key + '-' + sriRequest.params.filename; //get name from params for download.
       }
       return name;
     }
