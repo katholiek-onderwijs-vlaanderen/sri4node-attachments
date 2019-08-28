@@ -286,7 +286,7 @@ exports = module.exports = {
     async function handleFileUpload(fileStream, tmpFileName) {
 
       let awss3 = createAWSS3Client();
-      
+
       let ReadableStreamClone = require("readable-stream-clone");
       let pass1 = new ReadableStreamClone(fileStream);
       let pass2 = new ReadableStreamClone(fileStream);
@@ -301,7 +301,7 @@ exports = module.exports = {
             reject(err);
           } else {
             //console.log(data); // successful response
-            
+
             debug('get hash of file stream')
             let hash = await hasha.fromStream(pass2); // generate a hash for the incoming file stream
             data.hash = hash;
@@ -740,7 +740,7 @@ exports = module.exports = {
               contentType = mime.contentType(sriRequest.params.filename);
 
             let headers = [
-              ['Content-Disposition', 'inline; filename=' + sriRequest.params.filename],
+              ['Content-Disposition', 'inline; filename="' + sriRequest.params.filename + '"'],
               ['Content-Type', contentType]
             ];
 
