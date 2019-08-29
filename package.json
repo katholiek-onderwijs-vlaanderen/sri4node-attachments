@@ -1,6 +1,6 @@
 {
   "name": "sri4node-attachments",
-  "version": "2.0.15",
+  "version": "2.0.17",
   "description": "A standard implementation to support attachments on sri4node resources.",
   "main": "js/sri4node-attachments.js",
   "scripts": {
@@ -13,9 +13,7 @@
     "mime-types": "^2.1.21",
     "q": "^1.0.1",
     "s3": "4.4.x",
-    "uuid": "2.0.x",
-    "hasha": "5.0.0",
-    "readable-stream-clone": "0.0.4"
+    "uuid": "2.0.x"
   },
   "devDependencies": {
     "express": "~4.9.x",

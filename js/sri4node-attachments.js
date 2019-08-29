@@ -10,7 +10,6 @@ const streams = require('memory-streams');
 const pEvent = require('p-event');
 const S3 = require('aws-sdk/clients/s3');
 const mime = require('mime-types');
-const hasha = require('hasha');
 
 exports = module.exports = {
   configure: function (config) {
@@ -287,12 +286,8 @@ exports = module.exports = {
 
       let awss3 = createAWSS3Client();
 
-      let ReadableStreamClone = require("readable-stream-clone");
-      let pass1 = new ReadableStreamClone(fileStream);
-      let pass2 = new ReadableStreamClone(fileStream);
-
       debug('Uploading file ' + tmpFileName);
-      let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: pass1 }; //, Metadata: { "attachmentkey": fileWithJson.attachment.key }
+      let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: fileStream }; //, Metadata: { "attachmentkey": fileWithJson.attachment.key }
 
       return new Promise((accept, reject) => {
         awss3.upload(params, async function (err, data) {
@@ -301,12 +296,6 @@ exports = module.exports = {
             reject(err);
           } else {
             //console.log(data); // successful response
-
-            debug('get hash of file stream')
-            let hash = await hasha.fromStream(pass2); // generate a hash for the incoming file stream
-            data.hash = hash;
-            debug('done getting hash of file stream: ' + hash)
-
             accept(data)
           }
         });
@@ -474,8 +463,12 @@ exports = module.exports = {
             const uploadTmpFile = async function (fileObj) {
               console.log('uploading tmp file')
               let response = await handleFileUpload(fileObj.file, fileObj.tmpFileName);
-              fileObj.hash = response.hash;
               console.log("upload to s3 done for " + fileObj.tmpFileName);
+
+              let meta = await getFileMeta(fileObj.tmpFileName);
+              fileObj.hash = meta.ETag;
+              fileObj.size = meta.ContentLength;
+
               return fileObj;
             };
 
@@ -498,12 +491,6 @@ exports = module.exports = {
                     failed.push(ex);
                   })
                 );
-
-                file.on('data', async function (data) {
-                  debug('File [' + fieldname + '] got ' + data.length + ' bytes');
-                  fileObj.size = (fileObj.size + data.length) || data.length;
-                });
-
 
                 sriRequest.attachmentsRcvd.push(fileObj);
               });
