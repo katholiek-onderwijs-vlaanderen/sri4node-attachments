@@ -10,7 +10,6 @@ const streams = require('memory-streams');
 const pEvent = require('p-event');
 const S3 = require('aws-sdk/clients/s3');
 const mime = require('mime-types');
-const hasha = require('hasha');
 
 exports = module.exports = {
   configure: function (config) {
@@ -286,33 +285,18 @@ exports = module.exports = {
     async function handleFileUpload(fileStream, tmpFileName) {
 
       let awss3 = createAWSS3Client();
-      
-      // let ReadableStreamClone = require("readable-stream-clone");
-      // let pass1 = new ReadableStreamClone(fileStream);
-      // let pass2 = new ReadableStreamClone(fileStream);
-
-      const PassThrough = require('stream').PassThrough;
-      let pass1 = new PassThrough;
-      let pass2 = new PassThrough;
-
-      fileStream.pipe(pass2).pipe(pass1);
 
       debug('Uploading file ' + tmpFileName);
-      let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: pass2 }; //, Metadata: { "attachmentkey": fileWithJson.attachment.key }
+      let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: fileStream }; //, Metadata: { "attachmentkey": fileWithJson.attachment.key }
 
-      return new Promise((accept, reject) => {
-        awss3.upload(params, async function (err, data) {
+      await new Promise((accept, reject) => {
+        awss3.upload(params, function (err, data) {
           if (err) { // an error occurred
             //console.log(err, err.stack)
             reject(err);
           } else {
             //console.log(data); // successful response
-
-            debug('get hash of file stream')
-            let hash = await hasha.fromStream(pass1); // generate a hash for the incoming file stream
-            data.hash = hash;
-            debug('done getting hash of file stream')
-
+            // file.tmpFile.cleanup();
             accept(data)
           }
         });
@@ -478,9 +462,7 @@ exports = module.exports = {
             let failed = [];
 
             const uploadTmpFile = async function (fileObj) {
-              console.log('uploading tmp file')
-              let response = await handleFileUpload(fileObj.file, fileObj.tmpFileName);
-              fileObj.hash = response.hash;
+              await handleFileUpload(fileObj.file, fileObj.tmpFileName);
               console.log("upload to s3 done for " + fileObj.tmpFileName);
               return fileObj;
             };
