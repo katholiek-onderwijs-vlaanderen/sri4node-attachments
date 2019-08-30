@@ -25,8 +25,7 @@ exports = module.exports = {
       maxRetries: 3,
       maximumFilesizeInMB: 10,
       verbose: false,
-      createBucketIfNotExists: false,
-      handleMultipleUploadsTogether: false
+      createBucketIfNotExists: false
     };
     objectMerge(configuration, config);
 
@@ -311,7 +310,7 @@ exports = module.exports = {
       } else if (filename) {
         name = sriRequest.params.key + '-' + filename; //get name from the DB(the getFileName fn) for delete
       } else {
-        name = sriRequest.params.key + '-' + encodeURI(sriRequest.params.filename); //get name from params for download.
+        name = sriRequest.params.key + '-' + sriRequest.params.filename; //get name from params for download.
       }
       return name;
     }
@@ -621,25 +620,9 @@ exports = module.exports = {
               await checkExistance(bodyJson.filter(e => e.file !== undefined), sriRequest);
 
               ///add uploads to the queue
-              if (!config.handleMultipleUploadsTogether) {
-
-                bodyJson.forEach(file => {
-                  uploads.push(
-                    handleTheFile(file)
-                    .then((suc) => {
-                      debug("handleFile success");
-                    })
-                    .catch((ex) => {
-                      console.log("handlefile failed");
-                      console.log(ex);
-                      failed.push(ex);
-                    })
-                  );
-                });
-
-              } else {
+              bodyJson.forEach(file => {
                 uploads.push(
-                  handleTheFile(bodyJson)
+                  handleTheFile(file)
                   .then((suc) => {
                     debug("handleFile success");
                   })
@@ -649,7 +632,8 @@ exports = module.exports = {
                     failed.push(ex);
                   })
                 );
-              }
+
+              });
 
 
               await Promise.all(uploads);
