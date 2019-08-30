@@ -474,8 +474,7 @@ exports = module.exports = {
                 let fileObj = ({ filename, mimetype, file, fields: {} });
 
                 fileObj.tmpFileName = getTmpFilename(filename);
-                // fileObj.writer = fs.createWriteStream(null, { fd: fileObj.tmpFile.fd });
-                // file.pipe(fileObj.writer);
+
                 tmpUploads.push(
                   uploadTmpFile(fileObj)
                   .then((suc) => {})
@@ -485,13 +484,6 @@ exports = module.exports = {
                     failed.push(ex);
                   })
                 );
-
-                // file.on('data', async function (data) {
-                //   //console.log('File [' + fieldname + '] got ' + data.length + ' bytes');
-                //   //write to buffer
-                //   fileObj.writer.write(data);
-                // });
-
 
                 sriRequest.attachmentsRcvd.push(fileObj);
               });
