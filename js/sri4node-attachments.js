@@ -286,13 +286,19 @@ exports = module.exports = {
     async function handleFileUpload(fileStream, tmpFileName) {
 
       let awss3 = createAWSS3Client();
+      
+      // let ReadableStreamClone = require("readable-stream-clone");
+      // let pass1 = new ReadableStreamClone(fileStream);
+      // let pass2 = new ReadableStreamClone(fileStream);
 
-      let ReadableStreamClone = require("readable-stream-clone");
-      let pass1 = new ReadableStreamClone(fileStream);
-      let pass2 = new ReadableStreamClone(fileStream);
+      const PassThrough = require('stream').PassThrough;
+      let pass1 = new PassThrough;
+      let pass2 = new PassThrough;
+
+      fileStream.pipe(pass2).pipe(pass1);
 
       debug('Uploading file ' + tmpFileName);
-      let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: pass1 }; //, Metadata: { "attachmentkey": fileWithJson.attachment.key }
+      let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: pass2 }; //, Metadata: { "attachmentkey": fileWithJson.attachment.key }
 
       return new Promise((accept, reject) => {
         awss3.upload(params, async function (err, data) {
@@ -303,9 +309,9 @@ exports = module.exports = {
             //console.log(data); // successful response
 
             debug('get hash of file stream')
-            let hash = await hasha.fromStream(pass2); // generate a hash for the incoming file stream
+            let hash = await hasha.fromStream(pass1); // generate a hash for the incoming file stream
             data.hash = hash;
-            debug('done getting hash of file stream: ' + hash)
+            debug('done getting hash of file stream')
 
             accept(data)
           }
@@ -499,10 +505,11 @@ exports = module.exports = {
                   })
                 );
 
-                file.on('data', async function (data) {
-                  debug('File [' + fieldname + '] got ' + data.length + ' bytes');
-                  fileObj.size = (fileObj.size + data.length) || data.length;
-                });
+                // file.on('data', async function (data) {
+                //   //console.log('File [' + fieldname + '] got ' + data.length + ' bytes');
+                //   //write to buffer
+                //   fileObj.writer.write(data);
+                // });
 
 
                 sriRequest.attachmentsRcvd.push(fileObj);
