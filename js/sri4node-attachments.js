@@ -672,7 +672,12 @@ exports = module.exports = {
 
               await Promise.all(renames);
 
-              stream.push('OK');
+              let response = [];
+              bodyJson.forEach(file => {
+                response.push({ status: 200, href: file.resource.href + "/attachments/" + file.attachment.key });
+              });
+              stream.push(response);
+              // stream.push('OK');
             }
           }
         }
