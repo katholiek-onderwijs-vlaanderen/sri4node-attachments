@@ -620,7 +620,7 @@ exports = module.exports = {
               await checkExistance(bodyJson.filter(e => e.file !== undefined), sriRequest);
 
               ///add uploads to the queue
-              bodyJson.forEach(file => {
+              /*bodyJson.forEach(file => {
                 uploads.push(
                   handleTheFile(file)
                   .then((suc) => {
@@ -633,7 +633,20 @@ exports = module.exports = {
                   })
                 );
 
-              });
+              });*/
+              
+              // No parallel for Persons API becaus
+              for(let file of bodyJson) {
+                await handleTheFile(file)
+                  .then((suc) => {
+                    debug("handleFile success");
+                  })
+                  .catch((ex) => {
+                    console.log("handlefile failed");
+                    console.log(ex);
+                    failed.push(ex);
+                  });
+              }
 
 
               await Promise.all(uploads);
