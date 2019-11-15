@@ -529,16 +529,11 @@ exports = module.exports = {
 
 
             let securityError;
-            let uploads = [];
+            // let uploads = [];
             let renames = [];
-            ///now that we validated the json body resource requirement, we can finally check security.....
-            try {
-              await checkSecurity(tx, sriRequest, bodyJson, 'create');
-            } catch (error) {
-              securityError = error;
-            }
+            
 
-            if (!securityError) {
+            // if (!securityError) {
 
               if (bodyJson.some(e => !e.attachment)) {
                 throw new sriRequest.SriError({
@@ -633,7 +628,9 @@ exports = module.exports = {
                   })
                 );
 
-              });*/
+              });
+              
+              await Promise.all(uploads);*/
               
               // No parallel for Persons API becaus
               for(let file of bodyJson) {
@@ -649,8 +646,16 @@ exports = module.exports = {
               }
 
 
-              await Promise.all(uploads);
+              
+            // }
+            
+            ///now that we validated the json body resource requirement, we can finally check security.....
+            try {
+              await checkSecurity(tx, sriRequest, bodyJson, 'create');
+            } catch (error) {
+              securityError = error;
             }
+            
             ///all files are now uploaded into their TMP versions.
 
             if (failed.length > 0 || securityError) { ///something failed. delete all tmp files
