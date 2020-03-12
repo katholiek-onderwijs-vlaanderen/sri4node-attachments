@@ -461,9 +461,9 @@ exports = module.exports = {
             let failed = [];
 
             const uploadTmpFile = async function (fileObj) {
-              console.log('uploading tmp file')
+              sriRequest.logDebug('uploading tmp file')
               let response = await handleFileUpload(fileObj.file, fileObj.tmpFileName);
-              console.log("upload to s3 done for " + fileObj.tmpFileName);
+              sriRequest.logDebug("upload to s3 done for " + fileObj.tmpFileName);
 
               let meta = await getFileMeta(fileObj.tmpFileName);
               fileObj.hash = meta.ETag;
@@ -475,7 +475,7 @@ exports = module.exports = {
             sriRequest.busBoy.on('file',
               async function (fieldname, file, filename, encoding, mimetype) {
 
-                console.log('File [' + fieldname + ']: filename: ' + filename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
+                sriRequest.logDebug('File [' + fieldname + ']: filename: ' + filename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
 
                 let fileObj = ({ filename, mimetype, file, fields: {} });
 
@@ -486,8 +486,8 @@ exports = module.exports = {
                   uploadTmpFile(fileObj)
                   .then((suc) => {})
                   .catch((ex) => {
-                    console.log("uploadTmpFile failed");
-                    console.log(ex);
+                    sriRequest.logDebug("uploadTmpFile failed");
+                    sriRequest.logDebug(ex);
                     failed.push(ex);
                   })
                 );
@@ -497,17 +497,17 @@ exports = module.exports = {
 
 
             sriRequest.busBoy.on('field', function (fieldname, val, fieldnameTruncated, valTruncated, encoding, mimetype) {
-              console.log('Field [' + fieldname + ']: value: ' + val);
+              sriRequest.logDebug('Field [' + fieldname + ']: value: ' + val);
               sriRequest.fieldsRcvd[fieldname] = val;
             });
 
 
             // wait until busboy is done
             await pEvent(sriRequest.busBoy, 'finish');
-            console.log('busBoy is done'); //, sriRequest.attachmentsRcvd)
+            sriRequest.logDebug('busBoy is done'); //, sriRequest.attachmentsRcvd)
 
             await Promise.all(tmpUploads);
-            console.log("tmp uploads done");
+            sriRequest.logDebug("tmp uploads done");
 
             let bodyJson = sriRequest.fieldsRcvd.body;
 
@@ -596,7 +596,7 @@ exports = module.exports = {
               //validate JSONs for each of the files
               bodyJson.forEach(att => {
                 if (att.file !== undefined) {
-                  // console.log(att.file);
+                  // sriRequest.logDebug(att.file);
                   att.file = sriRequest.attachmentsRcvd.find(attf => attf.filename === att.file);
 
                   if (att.file === undefined) {
@@ -628,8 +628,8 @@ exports = module.exports = {
                       debug("handleFile success");
                     })
                     .catch((ex) => {
-                      console.log("handlefile failed");
-                      console.log(ex);
+                      sriRequest.logDebug("handlefile failed");
+                      sriRequest.logDebug(ex);
                       failed.push(ex);
                     })
                   );
@@ -642,8 +642,8 @@ exports = module.exports = {
                     debug("handleFile success");
                   })
                   .catch((ex) => {
-                    console.log("handlefile failed");
-                    console.log(ex);
+                    sriRequest.logDebug("handlefile failed");
+                    sriRequest.logDebug(ex);
                     failed.push(ex);
                   })
                 );
@@ -656,7 +656,7 @@ exports = module.exports = {
 
             if (failed.length > 0 || securityError) { ///something failed. delete all tmp files
               ///delete attachments again
-              console.log("something went wrong during upload/afterupload");
+              sriRequest.logDebug("something went wrong during upload/afterupload");
               let s3client = createS3Client(configuration);
 
               let filenames = sriRequest.attachmentsRcvd.filter(e => e.tmpFileName).map(e => e.tmpFileName);
@@ -664,10 +664,10 @@ exports = module.exports = {
               if (filenames.length) {
                 try {
                   await deleteFromS3(s3client, filenames);
-                  console.log(filenames.join(" & ") + " deleted");
+                  sriRequest.logDebug(filenames.join(" & ") + " deleted");
                 } catch (err) {
-                  console.log("delete rollback failed");
-                  console.log(err);
+                  sriRequest.logDebug("delete rollback failed");
+                  sriRequest.logDebug(err);
                 }
               }
 
@@ -719,7 +719,7 @@ exports = module.exports = {
           binaryStream: true,
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
             await checkSecurity(tx, sriRequest, null, 'read');
-            console.log(sriRequest.params.filename);
+            sriRequest.logDebug(sriRequest.params.filename);
 
             let contentType = 'application/octet-stream';
 
@@ -739,7 +739,7 @@ exports = module.exports = {
           streamingHandler: async(tx, sriRequest, stream) => {
 
             await handleFileDownload(tx, sriRequest, stream);
-            console.log('streaming download done');
+            sriRequest.logDebug('streaming download done');
           }
         };
       },
