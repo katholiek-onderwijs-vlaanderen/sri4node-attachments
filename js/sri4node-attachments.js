@@ -1,4 +1,3 @@
-var s3 = require('s3');
 var Q = require('q');
 
 var common = require('./common.js');
@@ -110,27 +109,27 @@ exports = module.exports = {
 
 
 
-    function createS3Client() {
-      var s3key = configuration.s3key; // eslint-disable-line
-      var s3secret = configuration.s3secret; // eslint-disable-line
+    // function createS3Client() {
+    //   var s3key = configuration.s3key; // eslint-disable-line
+    //   var s3secret = configuration.s3secret; // eslint-disable-line
 
-      if (s3key && s3secret) {
-        return s3.createClient({
-          maxAsyncS3: 20,
-          s3RetryCount: configuration.maxRetries,
-          s3RetryDelay: 1000,
-          multipartUploadThreshold: (configuration.maximumFilesizeInMB + 1) * 1024 * 1024,
-          multipartUploadSize: configuration.maximumFilesizeInMB * 1024 * 1024, // this is the default (15 MB)
-          s3Options: {
-            accessKeyId: s3key,
-            secretAccessKey: s3secret,
-            region: configuration.s3region
-          }
-        });
-      }
+    //   if (s3key && s3secret) {
+    //     return s3.createClient({
+    //       maxAsyncS3: 20,
+    //       s3RetryCount: configuration.maxRetries,
+    //       s3RetryDelay: 1000,
+    //       multipartUploadThreshold: (configuration.maximumFilesizeInMB + 1) * 1024 * 1024,
+    //       multipartUploadSize: configuration.maximumFilesizeInMB * 1024 * 1024, // this is the default (15 MB)
+    //       s3Options: {
+    //         accessKeyId: s3key,
+    //         secretAccessKey: s3secret,
+    //         region: configuration.s3region
+    //       }
+    //     });
+    //   }
 
-      return null;
-    }
+    //   return null;
+    // }
 
     async function headFromS3(s3filename) {
       debug('get HEAD for ' + s3filename);
@@ -167,12 +166,13 @@ exports = module.exports = {
       return data;
     }
 
-    function downloadFromS3(s3client, outstream, filename) {
+    function downloadFromS3(outstream, filename) {
       var deferred = Q.defer();
 
       var s3bucket = configuration.s3bucket;
-      var stream, msg;
+      var msg;
 
+      let awss3 = createAWSS3Client();
       var params = {
         Bucket: s3bucket,
         Key: filename
@@ -180,7 +180,12 @@ exports = module.exports = {
 
       headFromS3(filename).then(function (exists) {
         if (exists) {
-          stream = s3client.downloadStream(params);
+
+          const stream = awss3
+          .getObject(params)
+          .createReadStream()
+
+          // stream = s3client.downloadStream(params);
           stream.pipe(outstream);
           stream.on('error', function (err) {
             msg = 'All attempts to download failed!';
@@ -203,10 +208,10 @@ exports = module.exports = {
     }
 
 
-    function deleteFromS3(s3client, filenames) {
+    function deleteFromS3(filenames) {
       var deferred = Q.defer();
 
-      var s3bucket = configuration.s3bucket;
+      let awss3 = createAWSS3Client();
       var msg;
       var deleter;
 
@@ -218,7 +223,7 @@ exports = module.exports = {
           Objects: objects
         }
       };
-      deleter = s3client.deleteObjects(params);
+      deleter = awss3.deleteObjects(params);
       deleter.on('error', function (err) {
         msg = 'All attempts to delete failed!';
         error(msg);
@@ -278,7 +283,7 @@ exports = module.exports = {
         });
       });
 
-      await deleteFromS3(createS3Client(configuration), [tmpFileName]);
+      await deleteFromS3([tmpFileName]);
 
     }
 
@@ -317,67 +322,65 @@ exports = module.exports = {
 
     async function handleFileDownload(tx, sriRequest, stream) {
 
-      var s3client = createS3Client(configuration);
+      // var s3client = createS3Client(configuration);
       var remoteFilename;
       var localFilename;
       var exists;
       var msg;
 
 
-      if (s3client) {
-        remoteFilename = getS3FileName(sriRequest);
-        debug('Download ' + remoteFilename);
-        try {
-          let status = await downloadFromS3(s3client, stream, remoteFilename)
+      // if (s3client) {
+      remoteFilename = getS3FileName(sriRequest);
+      debug('Download ' + remoteFilename);
+      try {
+        let status = await downloadFromS3(stream, remoteFilename)
 
-        } catch (err) {
+      } catch (err) {
 
-          // File was streamed to client.
-          if (err === 404) {
-            throw new sriRequest.SriError({
-              status: 404
-            })
-          }
-
+        // File was streamed to client.
+        if (err === 404) {
           throw new sriRequest.SriError({
-            status: 500,
-            errors: [{
-              code: 'download.failed',
-              type: 'ERROR',
-              message: 'unable to download the file'
-            }]
+            status: 404
           })
-
         }
+
+        throw new sriRequest.SriError({
+          status: 500,
+          errors: [{
+            code: 'download.failed',
+            type: 'ERROR',
+            message: 'unable to download the file'
+          }]
+        })
+
       }
+      // }
     }
 
     async function handleFileDelete(tx, sriRequest, filename) {
 
-      var s3client = createS3Client(configuration);
+      // var s3client = createS3Client(configuration);
       var remoteFilename;
 
-
-
-      if (s3client) {
-        remoteFilename = getS3FileName(sriRequest, null, filename);
-        debug('Deleting file ' + remoteFilename);
-        try {
-          await deleteFromS3(s3client, [remoteFilename])
-          return { status: 204 };
-        } catch (err) {
-          error('Unable to delete file [' + remoteFilename + ']');
-          error(err);
-          throw new sriRequest.SriError({
-            status: 500,
-            errors: [{
-              code: 'delete.failed',
-              type: 'ERROR',
-              message: 'Unable to delete file [' + remoteFilename + ']'
-            }]
-          })
-        }
+      // if (s3client) {
+      remoteFilename = getS3FileName(sriRequest, null, filename);
+      debug('Deleting file ' + remoteFilename);
+      try {
+        await deleteFromS3([remoteFilename])
+        return { status: 204 };
+      } catch (err) {
+        error('Unable to delete file [' + remoteFilename + ']');
+        error(err);
+        throw new sriRequest.SriError({
+          status: 500,
+          errors: [{
+            code: 'delete.failed',
+            type: 'ERROR',
+            message: 'Unable to delete file [' + remoteFilename + ']'
+          }]
+        })
       }
+      // }
     }
 
 
@@ -656,13 +659,13 @@ exports = module.exports = {
             if (failed.length > 0 || securityError) { ///something failed. delete all tmp files
               ///delete attachments again
               sriRequest.logDebug("something went wrong during upload/afterupload");
-              let s3client = createS3Client(configuration);
+              // let s3client = createS3Client(configuration);
 
               let filenames = sriRequest.attachmentsRcvd.filter(e => e.tmpFileName).map(e => e.tmpFileName);
 
               if (filenames.length) {
                 try {
-                  await deleteFromS3(s3client, filenames);
+                  await deleteFromS3(filenames);
                   sriRequest.logDebug(filenames.join(" & ") + " deleted");
                 } catch (err) {
                   sriRequest.logDebug("delete rollback failed");

@@ -12,19 +12,10 @@
   "dependencies": {
     "mime-types": "^2.1.21",
     "q": "^1.0.1",
-    "s3": "4.4.x",
+    "aws-sdk": "2.672.0",
     "uuid": "2.0.x"
   },
-  "devDependencies": {
-    "express": "~4.9.x",
-    "pg": "2.x",
-    "mocha": "~2.2.4",
-    "node-uuid": "~1.4.3",
-    "needle": "0.x",
-    "eslint": "~1.4.3",
-    "sri4node": "1.x",
-    "sri4node-client": "1.x"
-  },
+  "devDependencies": {},
   "repository": {
     "type": "git",
     "url": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node-attachments.git"
