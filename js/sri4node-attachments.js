@@ -451,6 +451,7 @@ exports = module.exports = {
         return {
           routePostfix: '/attachments',
           httpMethods: ['POST'],
+          readOnly: false,
           busBoy: true,
 
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
@@ -698,6 +699,7 @@ exports = module.exports = {
         return {
           routePostfix: '/attachments/presigned',
           httpMethods: ['GET'],
+          readOnly: true,
           beforeHandler: async(tx, sriRequest) => {
             // await checkSecurity(tx, sriRequest, null, 'create');
           },
@@ -718,6 +720,7 @@ exports = module.exports = {
           routePostfix: '/:key/attachments/:filename([^/]*\.[A-Za-z0-9]{1,})',
 
           httpMethods: ['GET'],
+          readOnly: true,
           binaryStream: true,
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
             await checkSecurity(tx, sriRequest, null, 'read');
@@ -749,6 +752,7 @@ exports = module.exports = {
       customRouteForDelete: function (getFileNameHandler, afterHandler) {
         return {
           routePostfix: '/:key/attachments/:attachmentKey',
+          readOnly: false,
           httpMethods: ['DELETE'],
           beforeHandler: async(tx, sriRequest) => {
             await checkSecurity(tx, sriRequest, null, 'delete');
@@ -770,6 +774,7 @@ exports = module.exports = {
         return {
           routePostfix: '/:key/attachments/:attachmentKey',
           httpMethods: ['GET'],
+          readOnly: true,
           beforeHandler: async(tx, sriRequest) => {
             await checkSecurity(tx, sriRequest, null, 'read');
           },
