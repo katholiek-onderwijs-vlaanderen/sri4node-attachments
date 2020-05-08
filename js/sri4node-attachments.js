@@ -200,7 +200,7 @@ exports = module.exports = {
           // Also need to listen for close on outstream, to stop in case the request is aborted
           // at client-side before the end of the input stream (S3 file).
           outstream.on('close', function () {
-            console.log('OUTSTREAM CLOSED!.');
+            debug('Outstream closed.');
             deferred.resolve();
           });
 
