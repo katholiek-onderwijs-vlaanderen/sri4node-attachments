@@ -197,6 +197,13 @@ exports = module.exports = {
             debug('Finished download of file.');
             deferred.resolve(200);
           });
+          // Also need to listen for close on outstream, to stop in case the request is aborted
+          // at client-side before the end of the input stream (S3 file).
+          outstream.on('close', function () {
+            console.log('OUTSTREAM CLOSED!.');
+            deferred.resolve();
+          });
+
         } else {
           deferred.reject(404);
         }
