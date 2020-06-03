@@ -289,8 +289,8 @@ exports = module.exports = {
       debug('Uploading file ' + tmpFileName);
       let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: fileStream }; //, Metadata: { "attachmentkey": fileWithJson.attachment.key }
 
-      return new Promise((accept, reject) => {
-        awss3.upload(params, async function (err, data) {
+      await new Promise((accept, reject) => {
+        awss3.upload(params, function (err, data) {
           if (err) { // an error occurred
             //console.log(err, err.stack)
             reject(err);
@@ -480,8 +480,7 @@ exports = module.exports = {
                 let fileObj = ({ filename, mimetype, file, fields: {} });
 
                 fileObj.tmpFileName = getTmpFilename(filename);
-                // fileObj.writer = fs.createWriteStream(null, { fd: fileObj.tmpFile.fd });
-                // file.pipe(fileObj.writer);
+
                 tmpUploads.push(
                   uploadTmpFile(fileObj)
                   .then((suc) => {})
