@@ -1,22 +1,19 @@
 var s3 = require('s3');
 var Q = require('q');
-var qfs = require('q-io/fs');
-var fs = require('fs');
-var multer = require('multer');
-var multerAutoReap = require('multer-autoreap');
-multerAutoReap.options.reapOnError = true;
+
 var common = require('./common.js');
 var objectMerge = common.objectMerge;
 var warn = common.warn;
 var error = common.error;
 var debug = common.debug;
+const streams = require('memory-streams');
+const pEvent = require('p-event');
+const S3 = require('aws-sdk/clients/s3');
+const mime = require('mime-types');
 
 exports = module.exports = {
   configure: function (config) {
     'use strict';
-
-    var diskstorage;
-    var upload;
 
     // default configuration
     var configuration = {
@@ -24,33 +21,94 @@ exports = module.exports = {
       s3secret: '',
       s3bucket: '',
       s3region: 'eu-west-1',
+      security: { plugin: undefined, abilityPrepend: '', abilityAppend: '' },
+      maxRetries: 3,
       maximumFilesizeInMB: 10,
-      tempFolder: process.env.TMP ? process.env.TMP : '/tmp', // eslint-disable-line
-      folder: '/tmp',
-      verbose: false
+      verbose: false,
+      createBucketIfNotExists: false,
+      handleMultipleUploadsTogether: false
     };
     objectMerge(configuration, config);
 
-    // Use disk storage, limit to 5 files of max X Mb each.
-    // Avoids DoS attacks, or other service unavailability.
-    // Files are streamed from network -> temporary disk files.
-    // This requires virtually no memory on the server.
-    diskstorage = multer.diskStorage({
-      destination: configuration.tempFolder
-    });
+    checkOrCreateBucket(configuration);
 
-    upload = multer({
-      storage: diskstorage,
-      limits: {
-        fieldNameSize: 256,
-        fieldSize: 1024,
-        fields: 5,
-        fileSize: configuration.maximumFilesizeInMB * 1024 * 1024,
-        files: 5,
-        parts: 10,
-        headerPairs: 100
+    async function checkOrCreateBucket(config) {
+      let exists = await checkBucket(config.s3bucket);
+      if (!exists && !config.createBucketIfNotExists) {
+        console.error("S3 Bucket " + config.s3bucket + " does not exist");
+        console.error(configuration);
       }
-    });
+
+      if (!exists && config.createBucketIfNotExists) {
+        console.warn("Creating new bucket");
+
+        let awss3 = createAWSS3Client();
+        let params = {
+          Bucket: config.s3bucket,
+          ACL: 'private',
+          CreateBucketConfiguration: {
+            LocationConstraint: config.s3region
+          },
+        };
+
+        try {
+          await new Promise((accept, reject) => {
+            awss3.createBucket(params, function (err, data) {
+              if (err) { // an error occurred
+                console.log(err, err.stack)
+                reject(err);
+              } else {
+                //console.log(data); // successful response
+                accept(data)
+              }
+            });
+          });
+        } catch (ex) {
+          console.error('bucket creation failed');
+          console.log(ex);
+        }
+      }
+    }
+
+    async function checkBucket(bucket) {
+      debug('checking if bucket exists');
+
+      let awss3 = createAWSS3Client();
+      let params = { Bucket: bucket };
+
+      try {
+        await new Promise((accept, reject) => {
+          awss3.headBucket(params, function (err, data) {
+            if (err) { // an error occurred
+              //console.log(err)
+              reject(err);
+            } else {
+              //console.log(data); // successful response
+              accept(data)
+            }
+          });
+        });
+        return true;
+      } catch (ex) {
+        return false;
+      }
+
+    }
+
+    function createAWSS3Client() {
+      if (configuration.s3key && configuration.s3secret) {
+        return new S3({
+          apiVersion: '2006-03-01',
+          accessKeyId: configuration.s3key,
+          secretAccessKey: configuration.s3secret,
+          region: configuration.s3region,
+          maxRetries: configuration.maxRetries
+        })
+      }
+      return null;
+    }
+
+
 
     function createS3Client() {
       var s3key = configuration.s3key; // eslint-disable-line
@@ -59,7 +117,7 @@ exports = module.exports = {
       if (s3key && s3secret) {
         return s3.createClient({
           maxAsyncS3: 20,
-          s3RetryCount: 3,
+          s3RetryCount: configuration.maxRetries,
           s3RetryDelay: 1000,
           multipartUploadThreshold: (configuration.maximumFilesizeInMB + 1) * 1024 * 1024,
           multipartUploadSize: configuration.maximumFilesizeInMB * 1024 * 1024, // this is the default (15 MB)
@@ -74,79 +132,42 @@ exports = module.exports = {
       return null;
     }
 
-    // Determine if a file already exists using HEAD.
-    // Returns a Q promise.
-    function existsOnS3(s3client, filename) {
-      var deferred = Q.defer();
-      var lister;
-      var i, current;
-      var params = {
-        s3Params: {
-          Bucket: configuration.s3bucket,
-          Prefix: filename
-        }
-      };
-      var status = false;
+    async function headFromS3(s3filename) {
+      debug('get HEAD for ' + s3filename);
 
-      lister = s3client.listObjects(params);
-      lister.on('error', function (err) {
-        error('Unable to list in bucket [' + configuration.s3bucket + '] files with prefix [' + filename + ']');
-        error(err);
-        deferred.reject();
-      });
-      lister.on('data', function (data) {
-        for (i = 0; i < data.Contents.length; i++) {
-          current = data.Contents[i];
-          if (current.Key === filename) {
-            debug('FOUND file in bucket -> already exists');
-            status = true;
+      let awss3 = createAWSS3Client();
+      let params = { Bucket: configuration.s3bucket, Key: s3filename };
+
+      //console.log(params);
+      return new Promise((accept, reject) => {
+        awss3.headObject(params, function (err, data) {
+          if (err) { // an error occurred
+
+            reject(err);
+
+          } else {
+            //console.log(data); // successful response
+
+            accept(data)
           }
-        }
-      });
-      lister.on('end', function () {
-        deferred.resolve(status);
-      });
-
-      return deferred.promise;
-    }
-
-    function uploadToS3(s3client, fromFilename, toFilename) {
-      var deferred = Q.defer();
-
-      var msg, params;
-      var s3bucket = configuration.s3bucket; // eslint-disable-line
-      var ret = 201;
-
-      existsOnS3(s3client, toFilename).then(function (exists) {
-        if (exists) {
-          ret = 200;
-        }
-
-        params = {
-          localFile: fromFilename,
-          s3Params: {
-            Bucket: s3bucket,
-            Key: toFilename
-          }
-        };
-
-        var uploader = s3client.uploadFile(params);
-        uploader.on('error', function (err) {
-          msg = 'All attempts to uploads failed!';
-          error(msg);
-          error(err);
-          deferred.reject(msg);
-        });
-        uploader.on('end', function () {
-          debug('Upload of file [' + fromFilename + '] was successful.');
-          deferred.resolve(ret);
         });
       });
 
-      return deferred.promise;
     }
 
-    function downloadFromS3(s3client, response, filename) {
+
+    async function getFileMeta(s3filename) {
+      let data = null;
+      try {
+        let result = await headFromS3(s3filename);
+        data = result;
+      } catch (ex) {
+
+      }
+      return data;
+    }
+
+    function downloadFromS3(s3client, outstream, filename) {
       var deferred = Q.defer();
 
       var s3bucket = configuration.s3bucket;
@@ -157,10 +178,10 @@ exports = module.exports = {
         Key: filename
       };
 
-      existsOnS3(s3client, filename).then(function (exists) {
+      headFromS3(filename).then(function (exists) {
         if (exists) {
           stream = s3client.downloadStream(params);
-          stream.pipe(response);
+          stream.pipe(outstream);
           stream.on('error', function (err) {
             msg = 'All attempts to download failed!';
             error(msg);
@@ -172,28 +193,29 @@ exports = module.exports = {
             deferred.resolve(200);
           });
         } else {
-          deferred.resolve(404);
+          deferred.reject(404);
         }
+      }).catch(function (error) {
+        deferred.reject(404);
       });
 
       return deferred.promise;
     }
 
-    function deleteFromS3(s3client, response, filename) {
+
+    function deleteFromS3(s3client, filenames) {
       var deferred = Q.defer();
 
       var s3bucket = configuration.s3bucket;
       var msg;
       var deleter;
 
+      let objects = filenames.map(e => { return { Key: e } });
+
       var params = {
         Bucket: s3bucket,
         Delete: {
-          Objects: [
-            {
-              Key: filename
-            }
-          ]
+          Objects: objects
         }
       };
       deleter = s3client.deleteObjects(params);
@@ -210,231 +232,553 @@ exports = module.exports = {
       return deferred.promise;
     }
 
-    function handleFileUpload(req, res) {
-      var deferred = Q.defer();
+    async function checkExistance(files, sriRequest) {
 
-      var path = configuration.folder;
-      var s3client = createS3Client();
-      var i;
-      var fromFilename;
-      var toFilename;
-      var promises = [];
-      var statusCode;
+      for (let fileWithJson of files) {
+        //console.log(params);
+        let file = fileWithJson.file;
+        let head = await getFileMeta(getS3FileName(sriRequest, fileWithJson));
+        //console.log(head);
 
-      debug('handling file upload !');
-      debug(req.files);
-
-      if (s3client) {
-        statusCode = 200;
-        for (i = 0; i < req.files.length; i++) {
-          fromFilename = req.files[i].path;
-          toFilename = req.params.key + '-' + req.params.filename;
-          promises.push(uploadToS3(s3client, fromFilename, toFilename));
+        if (head && head.Metadata && head.Metadata.attachmentkey != fileWithJson.attachment.key) {
+          throw new sriRequest.SriError({
+            status: 409,
+            errors: [{
+              code: 'file.already.exists',
+              type: 'ERROR',
+              message: file.filename + ' already exists for this resource. Filename has to be unique per resource. To overwrite provide the existing file key.'
+            }]
+          })
         }
-        Q.all(promises).then(function (results) {
-          for (i = 0; i < results.length; i++) {
-            // Maximum status code goes to the client.
-            if (results[i] && results[i] > statusCode) {
-              statusCode = results[i];
-            }
-          }
-          // Acknowledge to the client that the files were stored.
-          res.sendStatus(statusCode);
-          deferred.resolve();
-        }).catch(function (err) {
-          error('Unable to upload all files...');
-          error(err);
-          // Notify the client that a problem occured.
-          res.sendStatus(500);
-          deferred.resolve();
-        });
-      } else {
-        if (path === '/tmp') {
-          warn('Storing files in /tmp. Only for testing purposes. DO NOT USE IN PRODUCTION !');
-        }
-        statusCode = 200;
-        for (i = 0; i < req.files.length; i++) {
-          fromFilename = req.files[i].path;
-          toFilename = path + '/' + req.params.key + '-' + req.params.filename;
-          try {
-            fs.lstatSync(toFilename);
-          } catch (err) {
-            if (err.code === 'ENOENT') {
-              // At least one of the files did not exist -> return 201.
-              statusCode = 201;
-            } else {
-              error(err);
-            }
-          }
-          promises.push(qfs.copy(fromFilename, toFilename));
-        }
-        Q.all(promises).then(function () {
-          // Acknowledge to the client that the files were stored.
-          res.sendStatus(statusCode);
-          deferred.resolve();
-        }).catch(function (err) {
-          error('Unable to upload all files...');
-          error(err);
-          // Notify the client that a problem occured.
-          res.sendStatus(500);
-          deferred.resolve();
-        });
       }
-
-      return deferred.promise;
     }
 
-    function handleFileDownload(req, res) {
-      var deferred = Q.defer();
+    function getTmpFilename(filename) {
+      return (new Date().getTime()) + '-' + filename + '.tmp';
+    }
 
-      var path = configuration.folder;
+
+    async function renameFile(fileWithJson) {
+      let file = fileWithJson.file;
+      let s3filename = getS3FileName(null, fileWithJson);
+      let tmpFileName = file.tmpFileName;
+      debug('Rename ' + tmpFileName + ' to ' + s3filename);
+      let awss3 = createAWSS3Client();
+      let params = { Bucket: configuration.s3bucket, Key: s3filename, ACL: "bucket-owner-full-control", CopySource: encodeURI("/" + configuration.s3bucket + "/" + tmpFileName), MetadataDirective: "REPLACE", TaggingDirective: "COPY", Metadata: { "attachmentkey": fileWithJson.attachment.key } };
+
+      await new Promise((accept, reject) => {
+        awss3.copyObject(params, function (err, data) {
+          if (err) { // an error occurred
+            //console.log(err, err.stack)
+            reject(err);
+          } else {
+            //console.log(data); // successful response
+            accept(data);
+          }
+        });
+      });
+
+      await deleteFromS3(createS3Client(configuration), [tmpFileName]);
+
+    }
+
+    async function handleFileUpload(fileStream, tmpFileName) {
+
+      let awss3 = createAWSS3Client();
+
+      debug('Uploading file ' + tmpFileName);
+      let params = { Bucket: configuration.s3bucket, Key: tmpFileName, ACL: "bucket-owner-full-control", Body: fileStream }; //, Metadata: { "attachmentkey": fileWithJson.attachment.key }
+
+      await new Promise((accept, reject) => {
+        awss3.upload(params, function (err, data) {
+          if (err) { // an error occurred
+            //console.log(err, err.stack)
+            reject(err);
+          } else {
+            //console.log(data); // successful response
+            accept(data)
+          }
+        });
+      });
+
+    }
+
+    function getS3FileName(sriRequest, file, filename) {
+      let name;
+      if (file) {
+        name = file.resource.key + '-' + file.file.filename; ///get filename from json for upload
+      } else if (filename) {
+        name = sriRequest.params.key + '-' + filename; //get name from the DB(the getFileName fn) for delete
+      } else {
+        name = sriRequest.params.key + '-' + sriRequest.params.filename; //get name from params for download.
+      }
+      return name;
+    }
+
+    async function handleFileDownload(tx, sriRequest, stream) {
+
       var s3client = createS3Client(configuration);
       var remoteFilename;
       var localFilename;
       var exists;
       var msg;
 
-      debug('handling file download !');
+
       if (s3client) {
-        remoteFilename = req.params.key + '-' + req.params.filename;
-        downloadFromS3(s3client, res, remoteFilename).then(function (status) {
-          // File was streamed to client.
-          if (status === 404) {
-            res.sendStatus(404);
-          }
-          deferred.resolve();
-        }).catch(function (err) {
-          msg = 'Unable to download a file.';
-          error(msg);
-          error(err);
-          res.sendStatus(500);
-          deferred.resolve();
-        });
-      } else {
-        if (path === '/tmp') {
-          warn('Storing files in /tmp. Only for testing purposes. DO NOT USE IN PRODUCTION !');
-        }
-        localFilename = path + '/' + req.params.key + '-' + req.params.filename;
+        remoteFilename = getS3FileName(sriRequest);
+        debug('Download ' + remoteFilename);
         try {
-          fs.lstatSync(localFilename);
-          exists = true;
+          let status = await downloadFromS3(s3client, stream, remoteFilename)
+
         } catch (err) {
-          if (err.code === 'ENOENT') {
-            exists = false;
-          } else {
-            error('Unable to determine if file exists...');
-            error(err);
-            res.sendStatus(500);
-            deferred.resolve();
-            return deferred.resolve();
+
+          // File was streamed to client.
+          if (err === 404) {
+            throw new sriRequest.SriError({
+              status: 404
+            })
           }
-        }
-        if (exists) {
-          // TODO : Store meta-information like content-type in a second file on disk.
-          res.setHeader('content-type', 'image/png');
-          fs.createReadStream(localFilename).pipe(res).on('end', function () {
-            deferred.resolve();
-          }).on('error', function () {
-            debug('Streaming file to client failed.');
-            res.sendStatus(500);
-            deferred.resolve();
-          });
-        } else {
-          // If no such file exist, send 404 to the client.
-          res.sendStatus(404);
-          deferred.resolve();
+
+          throw new sriRequest.SriError({
+            status: 500,
+            errors: [{
+              code: 'download.failed',
+              type: 'ERROR',
+              message: 'unable to download the file'
+            }]
+          })
+
         }
       }
-
-      return deferred.promise;
     }
 
-    function handleFileDelete(req, res) {
-      var deferred = Q.defer();
+    async function handleFileDelete(tx, sriRequest, filename) {
 
-      var path = configuration.folder;
       var s3client = createS3Client(configuration);
       var remoteFilename;
-      var localFilename;
-      var exists;
 
-      debug('handling file delete !');
+
+
       if (s3client) {
-        remoteFilename = req.params.key + '-' + req.params.filename;
-        deleteFromS3(s3client, res, remoteFilename).then(function () {
-          res.sendStatus(200);
-          deferred.resolve();
-        }).catch(function (err) {
+        remoteFilename = getS3FileName(sriRequest, null, filename);
+        debug('Deleting file ' + remoteFilename);
+        try {
+          await deleteFromS3(s3client, [remoteFilename])
+          return { status: 204 };
+        } catch (err) {
           error('Unable to delete file [' + remoteFilename + ']');
           error(err);
-          res.sendStatus(500);
-          deferred.resolve();
-        });
-      } else {
-        if (path === '/tmp') {
-          warn('Storing files in /tmp. Only for testing purposes. DO NOT USE IN PRODUCTION !');
+          throw new sriRequest.SriError({
+            status: 500,
+            errors: [{
+              code: 'delete.failed',
+              type: 'ERROR',
+              message: 'Unable to delete file [' + remoteFilename + ']'
+            }]
+          })
         }
-        localFilename = path + '/' + req.params.key + '-' + req.params.filename;
-        try {
-          fs.lstatSync(localFilename);
-          exists = true;
-        } catch (err) {
-          if (err.code === 'ENOENT') {
-            exists = false;
+      }
+    }
+
+
+
+    async function getPreSigned() {
+      debug('getting presigned post for s3');
+
+      let awss3 = createAWSS3Client();
+
+      let params = {
+        Bucket: configuration.s3bucket,
+        Conditions: [['starts-with', '$key', 'tmp']]
+      };
+
+      return await new Promise((accept, reject) => {
+        awss3.createPresignedPost(params, function (err, data) {
+          if (err) { // an error occurred
+            //console.log(err, err.stack)
+            console.error('Presigning post data encountered an error', err);
+            reject(err);
           } else {
-            error('Unable to determine if file exists...');
-            error(err);
-            res.sendStatus(500);
-            deferred.resolve();
-            return deferred.promise;
+            //console.log(data); // successful response
+            console.log('The post data is', data);
+            accept(data)
           }
-        }
-        if (exists) {
-          fs.unlinkSync(localFilename);
-          debug('File was deleted !');
-        }
-        res.sendStatus(200);
-        deferred.resolve();
+        });
+      });
+
+
+    }
+
+
+    async function checkSecurity(tx, sriRequest, bodyJson, ability) {
+      let resources = new Set();
+      if (bodyJson) {
+        bodyJson.forEach(e => { resources.add(e.resource.href) });
+      } else {
+        resources.add(sriRequest.sriType + '/' + sriRequest.params.key)
       }
 
-      return deferred.promise;
+      if (configuration.security.plugin) {
+        let security = configuration.security.plugin;
+        let attAbility = ability;
+        if (configuration.security.abilityPrepend)
+          attAbility = configuration.security.abilityPrepend + attAbility;
+        if (configuration.security.abilityAppend)
+          attAbility = attAbility + configuration.security.abilityAppend;
+        let t = [...resources];
+        await security.checkPermissionOnResourceList(tx, sriRequest, attAbility, t);
+      }
+      return true;
+    }
+
+    function checkBodyJson(file, bodyJson, sriRequest) {
+      if (!bodyJson.some(e => e.file === file.filename))
+        throw new sriRequest.SriError({
+          status: 409,
+          errors: [{
+            code: 'body.incomplete',
+            type: 'ERROR',
+            message: file.filename + ' needs an accompanying json object in the BODY array.'
+          }]
+        })
     }
 
     return {
-      customRouteForUpload: function (type, extraMiddleware) {
-        var allMiddleware = [
-          multerAutoReap,
-          upload.any()
-        ];
-        if (extraMiddleware) {
-          allMiddleware = allMiddleware.concat(extraMiddleware);
+      customRouteForUpload: function (runAfterUpload) {
+        return {
+          routePostfix: '/attachments',
+          httpMethods: ['POST'],
+          busBoy: true,
+
+          beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
+
+          },
+          streamingHandler: async(tx, sriRequest, stream) => {
+            sriRequest.attachmentsRcvd = [];
+            sriRequest.fieldsRcvd = {};
+
+            let tmpUploads = [];
+            let failed = [];
+
+            const uploadTmpFile = async function (fileObj) {
+              sriRequest.logDebug('uploading tmp file')
+              let response = await handleFileUpload(fileObj.file, fileObj.tmpFileName);
+              sriRequest.logDebug("upload to s3 done for " + fileObj.tmpFileName);
+
+              let meta = await getFileMeta(fileObj.tmpFileName);
+              fileObj.hash = meta.ETag;
+              fileObj.size = meta.ContentLength;
+
+              return fileObj;
+            };
+
+            sriRequest.busBoy.on('file',
+              async function (fieldname, file, filename, encoding, mimetype) {
+
+                sriRequest.logDebug('File [' + fieldname + ']: filename: ' + filename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
+
+                let fileObj = ({ filename, mimetype, file, fields: {} });
+
+                fileObj.tmpFileName = getTmpFilename(filename);
+
+                tmpUploads.push(
+                  uploadTmpFile(fileObj)
+                  .then((suc) => {})
+                  .catch((ex) => {
+                    sriRequest.logDebug("uploadTmpFile failed");
+                    sriRequest.logDebug(ex);
+                    failed.push(ex);
+                  })
+                );
+
+                sriRequest.attachmentsRcvd.push(fileObj);
+              });
+
+
+            sriRequest.busBoy.on('field', function (fieldname, val, fieldnameTruncated, valTruncated, encoding, mimetype) {
+              sriRequest.logDebug('Field [' + fieldname + ']: value: ' + val);
+              sriRequest.fieldsRcvd[fieldname] = val;
+            });
+
+
+            // wait until busboy is done
+            await pEvent(sriRequest.busBoy, 'finish');
+            sriRequest.logDebug('busBoy is done'); //, sriRequest.attachmentsRcvd)
+
+            await Promise.all(tmpUploads);
+            sriRequest.logDebug("tmp uploads done");
+
+            let bodyJson = sriRequest.fieldsRcvd.body;
+
+            if (bodyJson === undefined) {
+              throw new sriRequest.SriError({
+                status: 409,
+                errors: [{
+                  code: 'missing.body',
+                  type: 'ERROR',
+                  message: 'Body is required.'
+                }]
+              });
+            } else {
+              bodyJson = JSON.parse(bodyJson);
+              if (!Array.isArray(bodyJson))
+                bodyJson = [bodyJson];
+            }
+
+
+            let securityError;
+            let uploads = [];
+            let renames = [];
+            ///now that we validated the json body resource requirement, we can finally check security.....
+            try {
+              await checkSecurity(tx, sriRequest, bodyJson, 'create');
+            } catch (error) {
+              securityError = error;
+            }
+
+            if (!securityError) {
+
+              if (bodyJson.some(e => !e.attachment)) {
+                throw new sriRequest.SriError({
+                  status: 409,
+                  errors: [{
+                    code: 'missing.json.body.attachment',
+                    type: 'ERROR',
+                    message: 'each json item needs an "attachment"'
+                }]
+                });
+              }
+
+
+              if (bodyJson.some(e => !e.attachment.key)) {
+                throw new sriRequest.SriError({
+                  status: 409,
+                  errors: [{
+                    code: 'missing.json.attachment.key',
+                    type: 'ERROR',
+                    message: 'each attachment json needs a key'
+                }]
+                });
+              }
+
+              sriRequest.attachmentsRcvd.forEach(file => checkBodyJson(file, bodyJson, sriRequest));
+
+              sriRequest.attachmentsRcvd.forEach(file => file.mimetype = mime.contentType(file.filename));
+
+              bodyJson.forEach(att => {
+                if (!att.resource || !att.resource.href) {
+                  throw new sriRequest.SriError({
+                    status: 409,
+                    errors: [{
+                      code: 'missing.json.body.resource',
+                      type: 'ERROR',
+                      message: 'each attachment json needs a resource'
+                  }]
+                  });
+                } else {
+                  let chuncks = att.resource.href.split("/");
+                  att.resource.key = chuncks[chuncks.length - 1];
+                }
+              });
+
+
+
+
+              const handleTheFile = async function (att) {
+                // if (att.file)
+                //   await handleFileUpload(att, sriRequest);
+                await runAfterUpload(tx, sriRequest, att);
+                //throw "damn";
+                return att;
+              };
+
+              //validate JSONs for each of the files
+              bodyJson.forEach(att => {
+                if (att.file !== undefined) {
+                  // sriRequest.logDebug(att.file);
+                  att.file = sriRequest.attachmentsRcvd.find(attf => attf.filename === att.file);
+
+                  if (att.file === undefined) {
+                    throw new sriRequest.SriError({
+                      status: 409,
+                      errors: [{
+                        code: 'missing.file',
+                        type: 'ERROR',
+                        message: 'file ' + att.file + ' was expected but not found'
+                    }]
+                    });
+                  }
+                  // else {
+                  //   att.file.s3filename = getS3FileName(sriRequest, att);
+                  // }
+                }
+
+              });
+
+              await checkExistance(bodyJson.filter(e => e.file !== undefined), sriRequest);
+
+              ///add uploads to the queue
+              if (!config.handleMultipleUploadsTogether) {
+
+                bodyJson.forEach(file => {
+                  uploads.push(
+                    handleTheFile(file)
+                    .then((suc) => {
+                      debug("handleFile success");
+                    })
+                    .catch((ex) => {
+                      sriRequest.logDebug("handlefile failed");
+                      sriRequest.logDebug(ex);
+                      failed.push(ex);
+                    })
+                  );
+                });
+
+              } else {
+                uploads.push(
+                  handleTheFile(bodyJson)
+                  .then((suc) => {
+                    debug("handleFile success");
+                  })
+                  .catch((ex) => {
+                    sriRequest.logDebug("handlefile failed");
+                    sriRequest.logDebug(ex);
+                    failed.push(ex);
+                  })
+                );
+              }
+
+
+              await Promise.all(uploads);
+            }
+            ///all files are now uploaded into their TMP versions.
+
+            if (failed.length > 0 || securityError) { ///something failed. delete all tmp files
+              ///delete attachments again
+              sriRequest.logDebug("something went wrong during upload/afterupload");
+              let s3client = createS3Client(configuration);
+
+              let filenames = sriRequest.attachmentsRcvd.filter(e => e.tmpFileName).map(e => e.tmpFileName);
+
+              if (filenames.length) {
+                try {
+                  await deleteFromS3(s3client, filenames);
+                  sriRequest.logDebug(filenames.join(" & ") + " deleted");
+                } catch (err) {
+                  sriRequest.logDebug("delete rollback failed");
+                  sriRequest.logDebug(err);
+                }
+              }
+
+              if (securityError) throw securityError;
+
+              throw failed;
+              //stream.push(failed);
+            } else {
+              /// all went well, rename the files to their real names now.
+              bodyJson.filter(e => e.file !== undefined).forEach(file => {
+                renames.push(
+                  renameFile(file)
+                );
+
+              });
+
+              await Promise.all(renames);
+
+              stream.push('OK');
+            }
+          }
         }
+      },
 
+      customRouteForPreSignedUpload: function () {
         return {
-          route: type + '/:key/:filename',
-          method: 'PUT',
-          middleware: allMiddleware,
-          handler: handleFileUpload
+          routePostfix: '/attachments/presigned',
+          httpMethods: ['GET'],
+          beforeHandler: async(tx, sriRequest) => {
+            // await checkSecurity(tx, sriRequest, null, 'create');
+          },
+          handler: async(tx, sriRequest) => {
+            ///dp the presigned request to s3
+            let json = await getPreSigned();
+            return {
+              body: json,
+              status: 200
+            }
+          }
         };
       },
 
-      customRouteForDownload: function (type, extraMiddleware) {
+
+      customRouteForDownload: function () {
         return {
-          route: type + '/:key/:filename',
-          method: 'GET',
-          middleware: extraMiddleware,
-          handler: handleFileDownload
+          routePostfix: '/:key/attachments/:filename([^/]*\.[A-Za-z0-9]{1,})',
+
+          httpMethods: ['GET'],
+          binaryStream: true,
+          beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
+            await checkSecurity(tx, sriRequest, null, 'read');
+            sriRequest.logDebug(sriRequest.params.filename);
+
+            let contentType = 'application/octet-stream';
+
+            if (mime.contentType(sriRequest.params.filename))
+              contentType = mime.contentType(sriRequest.params.filename);
+
+            let headers = [
+              ['Content-Disposition', 'inline; filename="' + sriRequest.params.filename + '"'],
+              ['Content-Type', contentType]
+            ];
+
+            return {
+              status: 200,
+              headers: headers
+            }
+          },
+          streamingHandler: async(tx, sriRequest, stream) => {
+
+            await handleFileDownload(tx, sriRequest, stream);
+            sriRequest.logDebug('streaming download done');
+          }
         };
       },
 
-      customRouteForDelete: function (type, extraMiddleware) {
+      customRouteForDelete: function (getFileNameHandler, afterHandler) {
         return {
-          route: type + '/:key/:filename',
-          method: 'DELETE',
-          middleware: extraMiddleware,
-          handler: handleFileDelete
+          routePostfix: '/:key/attachments/:attachmentKey',
+          httpMethods: ['DELETE'],
+          beforeHandler: async(tx, sriRequest) => {
+            await checkSecurity(tx, sriRequest, null, 'delete');
+          },
+          handler: async(tx, sriRequest) => {
+            let filename = await getFileNameHandler(tx, sriRequest, sriRequest.params.key, sriRequest.params.attachmentKey);
+            await handleFileDelete(tx, sriRequest, filename);
+            return {
+              status: 204
+            }
+          },
+          afterHandler: async(tx, sriRequest) => {
+            await afterHandler(tx, sriRequest, sriRequest.params.key, sriRequest.params.attachmentKey)
+          }
         };
-      }
+      },
+
+      customRouteForGet: function (getAttJson) {
+        return {
+          routePostfix: '/:key/attachments/:attachmentKey',
+          httpMethods: ['GET'],
+          beforeHandler: async(tx, sriRequest) => {
+            await checkSecurity(tx, sriRequest, null, 'read');
+          },
+          handler: async(tx, sriRequest) => {
+            return {
+              body: await getAttJson(tx, sriRequest, sriRequest.params.key, sriRequest.params.attachmentKey),
+              status: 200
+            }
+          }
+        };
+      },
+
     };
   }
 };

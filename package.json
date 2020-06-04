@@ -1,6 +1,6 @@
 {
   "name": "sri4node-attachments",
-  "version": "0.1.3",
+  "version": "2.0.17",
   "description": "A standard implementation to support attachments on sri4node resources.",
   "main": "js/sri4node-attachments.js",
   "scripts": {
@@ -10,14 +10,10 @@
     "lint": "eslint sri4node-attachments.js js test"
   },
   "dependencies": {
+    "mime-types": "^2.1.21",
     "q": "^1.0.1",
-    "sri4node-client": "^1.0.0",
-    "array-unique": "0.2.1",
-    "uuid": "2.0.x",
-    "multer": "1.1.x",
-    "multer-autoreap": "0.0.x",
     "s3": "4.4.x",
-    "q-io": "1.13.x"
+    "uuid": "2.0.x"
   },
   "devDependencies": {
     "express": "~4.9.x",
@@ -26,11 +22,12 @@
     "node-uuid": "~1.4.3",
     "needle": "0.x",
     "eslint": "~1.4.3",
-    "sri4node": "1.x"
+    "sri4node": "1.x",
+    "sri4node-client": "1.x"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/dimitrydhondt/sri4node-attachments.git"
+    "url": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node-attachments.git"
   },
   "keywords": [
     "SRI",
@@ -40,10 +37,10 @@
     "node.js",
     "attachments"
   ],
-  "author": "Dimitry D'hondt <dimitry.dhondt@yahoo.com> (https://github.com/dimitrydhondt/sri4node-attachments)",
+  "author": "Dimitry D'hondt <dimitry.dhondt@yahoo.com>, refactored by Stefan Van der Straeten for Sri4node 2.0",
   "license": "LGPL-3.0",
   "bugs": {
-    "url": "https://github.com/dimitrydhondt/sri4node-attachments/issues"
+    "url": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node-attachments/issues"
   },
-  "homepage": "https://github.com/dimitrydhondt/sri4node-attachments"
+  "homepage": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node-attachments"
 }
