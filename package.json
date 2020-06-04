@@ -21,7 +21,7 @@
     "mocha": "~2.2.4",
     "node-uuid": "~1.4.3",
     "needle": "0.x",
-    "eslint": "~1.4.3",
+    "eslint": "~4.18.2",
     "sri4node": "1.x",
     "sri4node-client": "1.x"
   },
