@@ -215,33 +215,32 @@ exports = module.exports = {
     }
 
 
-    function deleteFromS3(filenames) {
-      var deferred = Q.defer();
+    async function deleteFromS3(filenames) {
 
       let awss3 = createAWSS3Client();
-      var msg;
-      var deleter;
 
       let objects = filenames.map(e => { return { Key: e } });
 
       var params = {
-        Bucket: s3bucket,
+        Bucket: configuration.s3bucket,
         Delete: {
           Objects: objects
         }
       };
-      deleter = awss3.deleteObjects(params);
-      deleter.on('error', function (err) {
-        msg = 'All attempts to delete failed!';
-        error(msg);
-        error(err);
-        deferred.reject();
+      
+      
+      await new Promise((accept, reject) => {
+        awss3.deleteObjects(params, function (err, data) {
+          if (err) { // an error occurred
+            //console.log(err, err.stack)
+            reject(err);
+          } else {
+            //console.log(data); // successful response
+            accept(data);
+          }
+        });
       });
-      deleter.on('end', function () {
-        deferred.resolve();
-      });
-
-      return deferred.promise;
+      
     }
 
     async function checkExistance(files, sriRequest) {
