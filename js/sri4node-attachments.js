@@ -274,8 +274,16 @@ exports = module.exports = {
       let s3filename = getS3FileName(null, fileWithJson);
       let tmpFileName = file.tmpFileName;
       debug('Rename ' + tmpFileName + ' to ' + s3filename);
+
+      await copyFile(s3filename, tmpFileName, fileWithJson.attachment.key);
+
+      await deleteFromS3([tmpFileName]);
+
+    }
+    
+    async function copyFile(destionationFileName, sourceFileName, attachmentKey) {
       let awss3 = createAWSS3Client();
-      let params = { Bucket: configuration.s3bucket, Key: s3filename, ACL: "bucket-owner-full-control", CopySource: encodeURI("/" + configuration.s3bucket + "/" + tmpFileName), MetadataDirective: "REPLACE", TaggingDirective: "COPY", Metadata: { "attachmentkey": fileWithJson.attachment.key } };
+      let params = { Bucket: configuration.s3bucket, Key: destionationFileName, ACL: "bucket-owner-full-control", CopySource: encodeURI("/" + configuration.s3bucket + "/" + sourceFileName), MetadataDirective: "REPLACE", TaggingDirective: "COPY", Metadata: { "attachmentkey": attachmentKey } };
 
       await new Promise((accept, reject) => {
         awss3.copyObject(params, function (err, data) {
@@ -288,9 +296,6 @@ exports = module.exports = {
           }
         });
       });
-
-      await deleteFromS3([tmpFileName]);
-
     }
 
     async function handleFileUpload(fileStream, tmpFileName) {
@@ -314,12 +319,16 @@ exports = module.exports = {
 
     }
 
-    function getS3FileName(sriRequest, file, filename) {
+    function getS3FileName(sriRequest, file, filename, href) {
       let name;
       if (file) {
         name = file.resource.key + '-' + file.file.filename; ///get filename from json for upload
       } else if (filename) {
         name = sriRequest.params.key + '-' + filename; //get name from the DB(the getFileName fn) for delete
+      } else if (href) { //for the copy
+        const spl = href.split('/');
+        const attInd = spl.indexOf('attachments');
+        name = spl[attInd-1]+'-'+spl[attInd+1];
       } else {
         name = sriRequest.params.key + '-' + sriRequest.params.filename; //get name from params for download.
       }
@@ -417,6 +426,34 @@ exports = module.exports = {
 
 
     }
+    
+    
+    async function copyAttachments(tx, sriRequest, bodyJson){
+      const toCopy =  bodyJson.filter(e=>e.fileHref);
+      if (toCopy.length) {
+        sriRequest.logDebug('copy attachments');
+        let resources = new Set();
+        toCopy.forEach(body => {
+           sriRequest.logDebug(body.fileHref.substring(0, 87)); //TODO this needs to be a copy helper function.
+           resources.add(body.fileHref.substring(0, 87));  
+           const filename = body.fileHref.split('/attachments/').pop();
+           body.file = {tmpFileName : getTmpFilename(filename), filename};
+        });
+        
+        await checkSecurityForResources(tx, sriRequest, 'read', resources);
+        
+        let promises = [];
+        
+        toCopy.forEach(body => {
+          promises.push(copyFile(body.file.tmpFileName, getS3FileName(undefined, undefined, undefined, body.fileHref), body.attachment.key ));
+        });
+        
+        await Promise.all(promises);
+        
+        
+      }
+      
+    }
 
 
     async function checkSecurity(tx, sriRequest, bodyJson, ability) {
@@ -428,6 +465,12 @@ exports = module.exports = {
       }
 
       if (configuration.security.plugin) {
+        await checkSecurityForResources(tx, sriRequest, ability, resources);
+      }
+      return true;
+    }
+    
+    async function checkSecurityForResources(tx, sriRequest, ability, resources) {
         let security = configuration.security.plugin;
         let attAbility = ability;
         if (configuration.security.abilityPrepend)
@@ -436,8 +479,6 @@ exports = module.exports = {
           attAbility = attAbility + configuration.security.abilityAppend;
         let t = [...resources];
         await security.checkPermissionOnResourceList(tx, sriRequest, attAbility, t);
-      }
-      return true;
     }
 
     function checkBodyJson(file, bodyJson, sriRequest) {
@@ -547,6 +588,8 @@ exports = module.exports = {
             }
 
             if (!securityError) {
+              
+            
 
               if (bodyJson.some(e => !e.attachment)) {
                 throw new sriRequest.SriError({
@@ -592,7 +635,8 @@ exports = module.exports = {
               });
 
 
-
+              await copyAttachments(tx, sriRequest, bodyJson);
+              
 
               const handleTheFile = async function (att) {
                 // if (att.file)
@@ -604,7 +648,7 @@ exports = module.exports = {
 
               //validate JSONs for each of the files
               bodyJson.forEach(att => {
-                if (att.file !== undefined) {
+                if (att.file !== undefined && !att.fileHref) {
                   // sriRequest.logDebug(att.file);
                   att.file = sriRequest.attachmentsRcvd.find(attf => attf.filename === att.file);
 
