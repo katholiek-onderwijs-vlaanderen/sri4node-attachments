@@ -428,14 +428,15 @@ exports = module.exports = {
     }
     
     
-    async function copyAttachments(tx, sriRequest, bodyJson){
+    async function copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy){
       const toCopy =  bodyJson.filter(e=>e.fileHref);
       if (toCopy.length) {
         sriRequest.logDebug('copy attachments');
         let resources = new Set();
+
         toCopy.forEach(body => {
-           sriRequest.logDebug(body.fileHref.substring(0, 87)); //TODO this needs to be a copy helper function.
-           resources.add(body.fileHref.substring(0, 87));  
+           const resourceHref = getResourceForCopy(body.fileHref);
+           resources.add(resourceHref);  
            const filename = body.fileHref.split('/attachments/').pop();
            body.file = {tmpFileName : getTmpFilename(filename), filename};
         });
@@ -443,6 +444,23 @@ exports = module.exports = {
         await checkSecurityForResources(tx, sriRequest, 'read', resources);
         
         let promises = [];
+        
+        toCopy.forEach(body => {
+          promises.push(getFileMeta(getS3FileName(undefined, undefined, undefined, body.fileHref)));
+        });
+        
+        const results =  await Promise.all(promises);
+        
+        if (results.some(e=>e == null)) {
+          throw new sriRequest.SriError({
+            status: 409,
+            errors: [{
+              code: 'file.to.copy.not.found',
+              type: 'ERROR',
+              message: 'One or more of the files to copy can not be found'
+            }]
+          });
+        }
         
         toCopy.forEach(body => {
           promises.push(copyFile(body.file.tmpFileName, getS3FileName(undefined, undefined, undefined, body.fileHref), body.attachment.key ));
@@ -494,7 +512,7 @@ exports = module.exports = {
     }
 
     return {
-      customRouteForUpload: function (runAfterUpload) {
+      customRouteForUpload: function (runAfterUpload, getResourceForCopy) {
         return {
           routePostfix: '/attachments',
           httpMethods: ['POST'],
@@ -634,9 +652,11 @@ exports = module.exports = {
                 }
               });
 
+              if (getResourceForCopy) {
 
-              await copyAttachments(tx, sriRequest, bodyJson);
+                await copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy);
               
+              }
 
               const handleTheFile = async function (att) {
                 // if (att.file)
