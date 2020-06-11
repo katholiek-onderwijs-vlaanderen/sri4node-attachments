@@ -537,16 +537,10 @@ exports = module.exports = {
 
 
             let securityError;
-            let uploads = [];
             let renames = [];
-            ///now that we validated the json body resource requirement, we can finally check security.....
-            try {
-              await checkSecurity(tx, sriRequest, bodyJson, 'create');
-            } catch (error) {
-              securityError = error;
-            }
+            
 
-            if (!securityError) {
+            // if (!securityError) {
 
               if (bodyJson.some(e => !e.attachment)) {
                 throw new sriRequest.SriError({
@@ -627,26 +621,41 @@ exports = module.exports = {
 
               await checkExistance(bodyJson.filter(e => e.file !== undefined), sriRequest);
 
-              ///add uploads to the queue
+              //add uploads to the queue
               if (!config.handleMultipleUploadsTogether) {
-
-                bodyJson.forEach(file => {
-                  uploads.push(
-                    handleTheFile(file)
-                    .then((suc) => {
-                      debug("handleFile success");
-                    })
-                    .catch((ex) => {
-                      sriRequest.logDebug("handlefile failed");
-                      sriRequest.logDebug(ex);
-                      failed.push(ex);
-                    })
-                  );
-                });
-
+                if (config.uploadInSequence) {
+                  // For example Persons Api which uses an sri4node as a proxy for its attachments files should be sequentially uploaded
+                  for(let file of bodyJson) {
+                    await handleTheFile(file)
+                      .then((suc) => {
+                        debug("handleFile success");
+                      })
+                      .catch((ex) => {
+                        sriRequest.logDebug("handlefile failed");
+                        sriRequest.logDebug(ex);
+                        failed.push(ex);
+                      });
+                  }
+                } else {
+                  let uploads = [];
+                  
+                  bodyJson.forEach(file => {
+                    uploads.push(
+                      handleTheFile(file)
+                      .then((suc) => {
+                        debug("handleFile success");
+                      })
+                      .catch((ex) => {
+                        sriRequest.logDebug("handlefile failed");
+                        sriRequest.logDebug(ex);
+                        failed.push(ex);
+                      })
+                    );
+                  });
+                  await Promise.all(uploads);
+                }
               } else {
-                uploads.push(
-                  handleTheFile(bodyJson)
+                handleTheFile(bodyJson)
                   .then((suc) => {
                     debug("handleFile success");
                   })
@@ -654,13 +663,18 @@ exports = module.exports = {
                     sriRequest.logDebug("handlefile failed");
                     sriRequest.logDebug(ex);
                     failed.push(ex);
-                  })
-                );
+                  });
               }
 
-
-              await Promise.all(uploads);
+            // }
+            
+            ///now that we validated the json body resource requirement, we can finally check security.....
+            try {
+              await checkSecurity(tx, sriRequest, bodyJson, 'create');
+            } catch (error) {
+              securityError = error;
             }
+            
             ///all files are now uploaded into their TMP versions.
 
             if (failed.length > 0 || securityError) { ///something failed. delete all tmp files
@@ -695,7 +709,12 @@ exports = module.exports = {
 
               await Promise.all(renames);
 
-              stream.push('OK');
+              let response = [];
+              bodyJson.forEach(file => {
+                response.push({ status: 200, href: file.resource.href + "/attachments/" + file.attachment.key });
+              });
+              stream.push(response);
+              // stream.push('OK');
             }
           }
         }
