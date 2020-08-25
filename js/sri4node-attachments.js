@@ -655,7 +655,7 @@ exports = module.exports = {
                   await Promise.all(uploads);
                 }
               } else {
-                handleTheFile(bodyJson)
+                await handleTheFile(bodyJson)
                   .then((suc) => {
                     debug("handleFile success");
                   })
