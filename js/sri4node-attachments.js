@@ -825,7 +825,7 @@ exports = module.exports = {
               contentType = mime.contentType(sriRequest.params.filename);
 
             let headers = [
-              ['Content-Disposition', 'inline; filename="' + sriRequest.params.filename + '"'],
+              ['Content-Disposition', 'inline; filename="' + escape(sriRequest.params.filename) + '"'],
               ['Content-Type', contentType]
             ];
 
