@@ -1,4 +1,3 @@
-var s3 = require('s3');
 var Q = require('q');
 
 var common = require('./common.js');
@@ -6,7 +5,7 @@ var objectMerge = common.objectMerge;
 var warn = common.warn;
 var error = common.error;
 var debug = common.debug;
-const streams = require('memory-streams');
+// const streams = require('memory-streams');
 const pEvent = require('p-event');
 const S3 = require('aws-sdk/clients/s3');
 const mime = require('mime-types');
@@ -110,27 +109,27 @@ exports = module.exports = {
 
 
 
-    function createS3Client() {
-      var s3key = configuration.s3key; // eslint-disable-line
-      var s3secret = configuration.s3secret; // eslint-disable-line
+    // function createS3Client() {
+    //   var s3key = configuration.s3key; // eslint-disable-line
+    //   var s3secret = configuration.s3secret; // eslint-disable-line
 
-      if (s3key && s3secret) {
-        return s3.createClient({
-          maxAsyncS3: 20,
-          s3RetryCount: configuration.maxRetries,
-          s3RetryDelay: 1000,
-          multipartUploadThreshold: (configuration.maximumFilesizeInMB + 1) * 1024 * 1024,
-          multipartUploadSize: configuration.maximumFilesizeInMB * 1024 * 1024, // this is the default (15 MB)
-          s3Options: {
-            accessKeyId: s3key,
-            secretAccessKey: s3secret,
-            region: configuration.s3region
-          }
-        });
-      }
+    //   if (s3key && s3secret) {
+    //     return s3.createClient({
+    //       maxAsyncS3: 20,
+    //       s3RetryCount: configuration.maxRetries,
+    //       s3RetryDelay: 1000,
+    //       multipartUploadThreshold: (configuration.maximumFilesizeInMB + 1) * 1024 * 1024,
+    //       multipartUploadSize: configuration.maximumFilesizeInMB * 1024 * 1024, // this is the default (15 MB)
+    //       s3Options: {
+    //         accessKeyId: s3key,
+    //         secretAccessKey: s3secret,
+    //         region: configuration.s3region
+    //       }
+    //     });
+    //   }
 
-      return null;
-    }
+    //   return null;
+    // }
 
     async function headFromS3(s3filename) {
       debug('get HEAD for ' + s3filename);
@@ -167,12 +166,13 @@ exports = module.exports = {
       return data;
     }
 
-    function downloadFromS3(s3client, outstream, filename) {
+    function downloadFromS3(outstream, filename) {
       var deferred = Q.defer();
 
       var s3bucket = configuration.s3bucket;
-      var stream, msg;
+      var msg;
 
+      let awss3 = createAWSS3Client();
       var params = {
         Bucket: s3bucket,
         Key: filename
@@ -180,7 +180,12 @@ exports = module.exports = {
 
       headFromS3(filename).then(function (exists) {
         if (exists) {
-          stream = s3client.downloadStream(params);
+
+          const stream = awss3
+          .getObject(params)
+          .createReadStream()
+
+          // stream = s3client.downloadStream(params);
           stream.pipe(outstream);
           stream.on('error', function (err) {
             msg = 'All attempts to download failed!';
@@ -192,6 +197,13 @@ exports = module.exports = {
             debug('Finished download of file.');
             deferred.resolve(200);
           });
+          // Also need to listen for close on outstream, to stop in case the request is aborted
+          // at client-side before the end of the input stream (S3 file).
+          outstream.on('close', function () {
+            debug('Outstream closed.');
+            deferred.resolve();
+          });
+
         } else {
           deferred.reject(404);
         }
@@ -203,33 +215,32 @@ exports = module.exports = {
     }
 
 
-    function deleteFromS3(s3client, filenames) {
-      var deferred = Q.defer();
+    async function deleteFromS3(filenames) {
 
-      var s3bucket = configuration.s3bucket;
-      var msg;
-      var deleter;
+      let awss3 = createAWSS3Client();
 
       let objects = filenames.map(e => { return { Key: e } });
 
       var params = {
-        Bucket: s3bucket,
+        Bucket: configuration.s3bucket,
         Delete: {
           Objects: objects
         }
       };
-      deleter = s3client.deleteObjects(params);
-      deleter.on('error', function (err) {
-        msg = 'All attempts to delete failed!';
-        error(msg);
-        error(err);
-        deferred.reject();
+      
+      
+      await new Promise((accept, reject) => {
+        awss3.deleteObjects(params, function (err, data) {
+          if (err) { // an error occurred
+            //console.log(err, err.stack)
+            reject(err);
+          } else {
+            //console.log(data); // successful response
+            accept(data);
+          }
+        });
       });
-      deleter.on('end', function () {
-        deferred.resolve();
-      });
-
-      return deferred.promise;
+      
     }
 
     async function checkExistance(files, sriRequest) {
@@ -263,8 +274,16 @@ exports = module.exports = {
       let s3filename = getS3FileName(null, fileWithJson);
       let tmpFileName = file.tmpFileName;
       debug('Rename ' + tmpFileName + ' to ' + s3filename);
+
+      await copyFile(s3filename, tmpFileName, fileWithJson.attachment.key);
+
+      await deleteFromS3([tmpFileName]);
+
+    }
+    
+    async function copyFile(destionationFileName, sourceFileName, attachmentKey) {
       let awss3 = createAWSS3Client();
-      let params = { Bucket: configuration.s3bucket, Key: s3filename, ACL: "bucket-owner-full-control", CopySource: encodeURI("/" + configuration.s3bucket + "/" + tmpFileName), MetadataDirective: "REPLACE", TaggingDirective: "COPY", Metadata: { "attachmentkey": fileWithJson.attachment.key } };
+      let params = { Bucket: configuration.s3bucket, Key: destionationFileName, ACL: "bucket-owner-full-control", CopySource: encodeURI("/" + configuration.s3bucket + "/" + sourceFileName), MetadataDirective: "REPLACE", TaggingDirective: "COPY", Metadata: { "attachmentkey": attachmentKey } };
 
       await new Promise((accept, reject) => {
         awss3.copyObject(params, function (err, data) {
@@ -277,9 +296,6 @@ exports = module.exports = {
           }
         });
       });
-
-      await deleteFromS3(createS3Client(configuration), [tmpFileName]);
-
     }
 
     async function handleFileUpload(fileStream, tmpFileName) {
@@ -303,12 +319,16 @@ exports = module.exports = {
 
     }
 
-    function getS3FileName(sriRequest, file, filename) {
+    function getS3FileName(sriRequest, file, filename, href) {
       let name;
       if (file) {
         name = file.resource.key + '-' + file.file.filename; ///get filename from json for upload
       } else if (filename) {
         name = sriRequest.params.key + '-' + filename; //get name from the DB(the getFileName fn) for delete
+      } else if (href) { //for the copy
+        const spl = href.split('/');
+        const attInd = spl.indexOf('attachments');
+        name = spl[attInd-1]+'-'+spl[attInd+1];
       } else {
         name = sriRequest.params.key + '-' + sriRequest.params.filename; //get name from params for download.
       }
@@ -317,67 +337,65 @@ exports = module.exports = {
 
     async function handleFileDownload(tx, sriRequest, stream) {
 
-      var s3client = createS3Client(configuration);
+      // var s3client = createS3Client(configuration);
       var remoteFilename;
       var localFilename;
       var exists;
       var msg;
 
 
-      if (s3client) {
-        remoteFilename = getS3FileName(sriRequest);
-        debug('Download ' + remoteFilename);
-        try {
-          let status = await downloadFromS3(s3client, stream, remoteFilename)
+      // if (s3client) {
+      remoteFilename = getS3FileName(sriRequest);
+      debug('Download ' + remoteFilename);
+      try {
+        let status = await downloadFromS3(stream, remoteFilename)
 
-        } catch (err) {
+      } catch (err) {
 
-          // File was streamed to client.
-          if (err === 404) {
-            throw new sriRequest.SriError({
-              status: 404
-            })
-          }
-
+        // File was streamed to client.
+        if (err === 404) {
           throw new sriRequest.SriError({
-            status: 500,
-            errors: [{
-              code: 'download.failed',
-              type: 'ERROR',
-              message: 'unable to download the file'
-            }]
+            status: 404
           })
-
         }
+
+        throw new sriRequest.SriError({
+          status: 500,
+          errors: [{
+            code: 'download.failed',
+            type: 'ERROR',
+            message: 'unable to download the file'
+          }]
+        })
+
       }
+      // }
     }
 
     async function handleFileDelete(tx, sriRequest, filename) {
 
-      var s3client = createS3Client(configuration);
+      // var s3client = createS3Client(configuration);
       var remoteFilename;
 
-
-
-      if (s3client) {
-        remoteFilename = getS3FileName(sriRequest, null, filename);
-        debug('Deleting file ' + remoteFilename);
-        try {
-          await deleteFromS3(s3client, [remoteFilename])
-          return { status: 204 };
-        } catch (err) {
-          error('Unable to delete file [' + remoteFilename + ']');
-          error(err);
-          throw new sriRequest.SriError({
-            status: 500,
-            errors: [{
-              code: 'delete.failed',
-              type: 'ERROR',
-              message: 'Unable to delete file [' + remoteFilename + ']'
-            }]
-          })
-        }
+      // if (s3client) {
+      remoteFilename = getS3FileName(sriRequest, null, filename);
+      debug('Deleting file ' + remoteFilename);
+      try {
+        await deleteFromS3([remoteFilename])
+        return { status: 204 };
+      } catch (err) {
+        error('Unable to delete file [' + remoteFilename + ']');
+        error(err);
+        throw new sriRequest.SriError({
+          status: 500,
+          errors: [{
+            code: 'delete.failed',
+            type: 'ERROR',
+            message: 'Unable to delete file [' + remoteFilename + ']'
+          }]
+        })
       }
+      // }
     }
 
 
@@ -408,6 +426,52 @@ exports = module.exports = {
 
 
     }
+    
+    
+    async function copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy){
+      const toCopy =  bodyJson.filter(e=>e.fileHref);
+      if (toCopy.length) {
+        sriRequest.logDebug('copy attachments');
+        let resources = new Set();
+
+        toCopy.forEach(body => {
+           const resourceHref = getResourceForCopy(body.fileHref);
+           resources.add(resourceHref);  
+           const filename = body.fileHref.split('/attachments/').pop();
+           body.file = {tmpFileName : getTmpFilename(filename), filename};
+        });
+        
+        await checkSecurityForResources(tx, sriRequest, 'read', resources);
+        
+        let promises = [];
+        
+        toCopy.forEach(body => {
+          promises.push(getFileMeta(getS3FileName(undefined, undefined, undefined, body.fileHref)));
+        });
+        
+        const results =  await Promise.all(promises);
+        
+        if (results.some(e=>e == null)) {
+          throw new sriRequest.SriError({
+            status: 409,
+            errors: [{
+              code: 'file.to.copy.not.found',
+              type: 'ERROR',
+              message: 'One or more of the files to copy can not be found'
+            }]
+          });
+        }
+        
+        toCopy.forEach(body => {
+          promises.push(copyFile(body.file.tmpFileName, getS3FileName(undefined, undefined, undefined, body.fileHref), body.attachment.key ));
+        });
+        
+        await Promise.all(promises);
+        
+        
+      }
+      
+    }
 
 
     async function checkSecurity(tx, sriRequest, bodyJson, ability) {
@@ -419,6 +483,12 @@ exports = module.exports = {
       }
 
       if (configuration.security.plugin) {
+        await checkSecurityForResources(tx, sriRequest, ability, resources);
+      }
+      return true;
+    }
+    
+    async function checkSecurityForResources(tx, sriRequest, ability, resources) {
         let security = configuration.security.plugin;
         let attAbility = ability;
         if (configuration.security.abilityPrepend)
@@ -427,8 +497,6 @@ exports = module.exports = {
           attAbility = attAbility + configuration.security.abilityAppend;
         let t = [...resources];
         await security.checkPermissionOnResourceList(tx, sriRequest, attAbility, t);
-      }
-      return true;
     }
 
     function checkBodyJson(file, bodyJson, sriRequest) {
@@ -444,10 +512,11 @@ exports = module.exports = {
     }
 
     return {
-      customRouteForUpload: function (runAfterUpload) {
+      customRouteForUpload: function (runAfterUpload, getResourceForCopy) {
         return {
           routePostfix: '/attachments',
           httpMethods: ['POST'],
+          readOnly: false,
           busBoy: true,
 
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
@@ -537,6 +606,8 @@ exports = module.exports = {
             }
 
             if (!securityError) {
+              
+            
 
               if (bodyJson.some(e => !e.attachment)) {
                 throw new sriRequest.SriError({
@@ -581,8 +652,11 @@ exports = module.exports = {
                 }
               });
 
+              if (getResourceForCopy) {
 
-
+                await copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy);
+              
+              }
 
               const handleTheFile = async function (att) {
                 // if (att.file)
@@ -594,7 +668,7 @@ exports = module.exports = {
 
               //validate JSONs for each of the files
               bodyJson.forEach(att => {
-                if (att.file !== undefined) {
+                if (att.file !== undefined && !att.fileHref) {
                   // sriRequest.logDebug(att.file);
                   att.file = sriRequest.attachmentsRcvd.find(attf => attf.filename === att.file);
 
@@ -656,13 +730,13 @@ exports = module.exports = {
             if (failed.length > 0 || securityError) { ///something failed. delete all tmp files
               ///delete attachments again
               sriRequest.logDebug("something went wrong during upload/afterupload");
-              let s3client = createS3Client(configuration);
+              // let s3client = createS3Client(configuration);
 
               let filenames = sriRequest.attachmentsRcvd.filter(e => e.tmpFileName).map(e => e.tmpFileName);
 
               if (filenames.length) {
                 try {
-                  await deleteFromS3(s3client, filenames);
+                  await deleteFromS3(filenames);
                   sriRequest.logDebug(filenames.join(" & ") + " deleted");
                 } catch (err) {
                   sriRequest.logDebug("delete rollback failed");
@@ -695,6 +769,7 @@ exports = module.exports = {
         return {
           routePostfix: '/attachments/presigned',
           httpMethods: ['GET'],
+          readOnly: true,
           beforeHandler: async(tx, sriRequest) => {
             // await checkSecurity(tx, sriRequest, null, 'create');
           },
@@ -715,6 +790,7 @@ exports = module.exports = {
           routePostfix: '/:key/attachments/:filename([^/]*\.[A-Za-z0-9]{1,})',
 
           httpMethods: ['GET'],
+          readOnly: true,
           binaryStream: true,
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
             await checkSecurity(tx, sriRequest, null, 'read');
@@ -746,6 +822,7 @@ exports = module.exports = {
       customRouteForDelete: function (getFileNameHandler, afterHandler) {
         return {
           routePostfix: '/:key/attachments/:attachmentKey',
+          readOnly: false,
           httpMethods: ['DELETE'],
           beforeHandler: async(tx, sriRequest) => {
             await checkSecurity(tx, sriRequest, null, 'delete');
@@ -767,6 +844,7 @@ exports = module.exports = {
         return {
           routePostfix: '/:key/attachments/:attachmentKey',
           httpMethods: ['GET'],
+          readOnly: true,
           beforeHandler: async(tx, sriRequest) => {
             await checkSecurity(tx, sriRequest, null, 'read');
           },
