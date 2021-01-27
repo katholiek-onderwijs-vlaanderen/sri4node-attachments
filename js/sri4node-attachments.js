@@ -599,13 +599,7 @@ exports = module.exports = {
             let renames = [];
             
 
-<<<<<<< HEAD
-            if (!securityError) {
-              
-            
-=======
             // if (!securityError) {
->>>>>>> origin/node12
 
               if (bodyJson.some(e => !e.attachment)) {
                 throw new sriRequest.SriError({
