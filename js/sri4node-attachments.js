@@ -496,7 +496,7 @@ exports = module.exports = {
         if (configuration.security.abilityAppend)
           attAbility = attAbility + configuration.security.abilityAppend;
         let t = [...resources];
-        await security.checkPermissionOnResourceList(tx, sriRequest, attAbility, t);
+        await security.checkPermissionOnResourceList(tx, sriRequest, attAbility, t, undefined, true);
     }
 
     function checkBodyJson(file, bodyJson, sriRequest) {
