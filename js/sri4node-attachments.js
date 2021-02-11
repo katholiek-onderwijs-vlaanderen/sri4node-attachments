@@ -810,13 +810,19 @@ exports = module.exports = {
           readOnly: true,
           binaryStream: true,
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
-            await checkSecurity(tx, sriRequest, null, 'read');
+            const mimetype = mime.contentType(sriRequest.params.filename);
+            if (mimetype && mimetype.startsWith('image/') && !sriRequest.params.filename.toLocaleLowerCase().match(/^thumbnail\./)) {
+              ///skip security
+            } else {
+              await checkSecurity(tx, sriRequest, null, 'read');
+            }
+            
             sriRequest.logDebug(sriRequest.params.filename);
 
             let contentType = 'application/octet-stream';
 
-            if (mime.contentType(sriRequest.params.filename))
-              contentType = mime.contentType(sriRequest.params.filename);
+            if (mimetype)
+              contentType = mimetype;
 
             let headers = [
               ['Content-Disposition', 'inline; filename="' + escape(sriRequest.params.filename) + '"'],
