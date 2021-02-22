@@ -815,8 +815,8 @@ exports = module.exports = {
 
             let contentType = 'application/octet-stream';
 
-            if (mime.contentType(sriRequest.params.filename))
-              contentType = mime.contentType(sriRequest.params.filename);
+            if (mime.lookup(sriRequest.params.filename))
+              contentType = mime.lookup(sriRequest.params.filename);
 
             let headers = [
               ['Content-Disposition', 'inline; filename="' + escape(sriRequest.params.filename) + '"'],
