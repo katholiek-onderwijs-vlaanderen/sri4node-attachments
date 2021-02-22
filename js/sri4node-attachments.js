@@ -810,7 +810,7 @@ exports = module.exports = {
           readOnly: true,
           binaryStream: true,
           beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
-            const mimetype = mime.contentType(sriRequest.params.filename);
+            const mimetype = mime.lookup(sriRequest.params.filename);
             if (mimetype && mimetype.startsWith('image/') && !sriRequest.params.filename.toLocaleLowerCase().match(/^thumbnail\./)) {
               ///skip security
             } else {
