@@ -16,7 +16,8 @@ The examples below are assumed from am `/activities` API
       s3bucket: process.env.S3_BUCKET,
       s3region: 'eu-central-1',
       maxRetries: 3,
-      createBucketIfNotExists: true //optional, if true, creates the bucket if it doesnt exist yet.
+      createBucketIfNotExists: true, //optional, if true, creates the bucket if it doesnt exist yet.
+      checkFileExistence: true // optional, checks if the file already exists in s3
     });
     //
     // Then pass the attachments plugin with your resource
