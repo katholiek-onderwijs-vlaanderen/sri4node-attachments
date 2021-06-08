@@ -25,7 +25,8 @@ exports = module.exports = {
       maximumFilesizeInMB: 10,
       verbose: false,
       createBucketIfNotExists: false,
-      handleMultipleUploadsTogether: false
+      handleMultipleUploadsTogether: false,
+      checkFileExistence: true
     };
     objectMerge(configuration, config);
 
@@ -243,7 +244,7 @@ exports = module.exports = {
       
     }
 
-    async function checkExistance(files, sriRequest) {
+    async function checkExistence(files, sriRequest) {
 
       for (let fileWithJson of files) {
         //console.log(params);
@@ -681,7 +682,9 @@ exports = module.exports = {
 
               });
 
-              await checkExistance(bodyJson.filter(e => e.file !== undefined), sriRequest);
+            if (config.checkFileExistence) {
+              await checkExistence(bodyJson.filter(e => e.file !== undefined), sriRequest);
+            }
 
               //add uploads to the queue
               if (!config.handleMultipleUploadsTogether) {
