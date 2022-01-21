@@ -105,7 +105,12 @@ exports = module.exports = {
           maxRetries: configuration.maxRetries
         })
       }
-      return null;
+      // return null;
+      return new S3({
+        apiVersion: '2006-03-01',
+        region: configuration.s3region,
+        maxRetries: configuration.maxRetries
+      })
     }
 
 
