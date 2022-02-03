@@ -338,10 +338,7 @@ module.exports = {
     async function handleFileDownload(tx, sriRequest, stream) {
 
       // const s3client = createS3Client(configuration);
-      const remoteFilename;
-
-      // if (s3client) {
-      remoteFilename = getS3FileName(sriRequest);
+      const remoteFilename = getS3FileName(sriRequest);
       debug(`Download ${remoteFilename}`);
       try {
         const status = await downloadFromS3(stream, remoteFilename);
@@ -368,10 +365,7 @@ module.exports = {
     async function handleFileDelete(tx, sriRequest, filename) {
 
       // const s3client = createS3Client(configuration);
-      const remoteFilename;
-
-      // if (s3client) {
-      remoteFilename = getS3FileName(sriRequest, null, filename);
+      const remoteFilename = getS3FileName(sriRequest, null, filename);
       debug(`Deleting file ${remoteFilename}`);
       try {
         await deleteFromS3([remoteFilename]);
