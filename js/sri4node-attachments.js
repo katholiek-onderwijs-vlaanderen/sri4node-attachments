@@ -207,7 +207,7 @@ module.exports = {
             reject(404);
           }
         } catch (error) {
-          error('[downloadFromS3] the download failed', error);
+          console.error('[downloadFromS3] the download failed', error);
           reject(500);
         }  
       })
