@@ -1,11 +1,12 @@
 # sri4node-attachments
+
 Support module to easily add support for attachments (BLOBs) on [SRI](https://github.com/dimitrydhondt/sri)
 resources implemented with [sri4node](https://github.com/dimitrydhondt/sri4node).
 Currently supports storing attachments on Amazon S3.
 This is sri4node-attachments 2.0 for sri4node 2.0. it hooks into busboy's streaming handlers from sri4node
 
 ## Example
-The examples below are assumed from am `/activities` API
+The examples below are assumed from a `/activities` API
 
     // First configure the module
     //
@@ -154,7 +155,7 @@ You can add custom handlers in the routes that are handling your attachments :
       attachments.customRouteForGet(getAttJson) //getAttJson is a function that gets the JSON of an attachment resource.
     ]
     ...
-    
+
 
 You can use this to update for example a database table, or a JSONB column on the affected resource, etc..
 

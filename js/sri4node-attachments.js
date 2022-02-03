@@ -2,7 +2,6 @@ const Q = require('q');
 
 const common = require('./common.js');
 
-const {objectMerge} = common;
 const {warn} = common;
 const {error} = common;
 const {debug} = common;
@@ -26,9 +25,9 @@ module.exports = {
       verbose: false,
       createBucketIfNotExists: false,
       handleMultipleUploadsTogether: false,
-      checkFileExistence: true
+      checkFileExistence: true,
+      ...config,
     };
-    objectMerge(configuration, config);
 
     checkOrCreateBucket(configuration);
 
@@ -95,21 +94,25 @@ module.exports = {
     }
 
     function createAWSS3Client() {
-      if (configuration.s3key && configuration.s3secret) {
-        return new S3({
-          apiVersion: '2006-03-01',
-          accessKeyId: configuration.s3key,
-          secretAccessKey: configuration.s3secret,
-          region: configuration.s3region,
-          maxRetries: configuration.maxRetries
-        });
+      if (!this.awss3client) {
+        if (configuration.s3key && configuration.s3secret) {
+          this.awss3client = new S3({
+            apiVersion: '2006-03-01',
+            accessKeyId: configuration.s3key,
+            secretAccessKey: configuration.s3secret,
+            region: configuration.s3region,
+            maxRetries: configuration.maxRetries
+          });
+        } else {
+          this.awss3client = new S3({
+            apiVersion: '2006-03-01',
+            region: configuration.s3region,
+            maxRetries: configuration.maxRetries
+          });
+        }
       }
-      // return null;
-      return new S3({
-        apiVersion: '2006-03-01',
-        region: configuration.s3region,
-        maxRetries: configuration.maxRetries
-      });
+
+      return this.awss3client;
     }
 
     // function createS3Client() {
@@ -134,20 +137,20 @@ module.exports = {
     //   return null;
     // }
 
-    async function headFromS3(s3filename) {
+    /*async*/ function headFromS3(s3filename) {
       debug(`get HEAD for ${s3filename}`);
 
       const awss3 = createAWSS3Client();
       const params = {Bucket: configuration.s3bucket, Key: s3filename};
 
       // console.log(params);
-      return new Promise((accept, reject) => {
+      return new Promise((resolve, reject) => {
         awss3.headObject(params, (err, data) => {
           if (err) { // an error occurred
             reject(err);
           } else {
             // console.log(data); // successful response
-            accept(data);
+            resolve(data);
           }
         });
       });
@@ -164,52 +167,51 @@ module.exports = {
       return data;
     }
 
-    function downloadFromS3(outstream, filename) {
-      const deferred = Q.defer();
-
+    /* async */ function downloadFromS3(outstream, filename) {
       const {s3bucket} = configuration;
-      const msg;
+      // const msg;
 
-      const awss3 = createAWSS3Client();
       const params = {
         Bucket: s3bucket,
         Key: filename
       };
 
-      headFromS3(filename).then((exists) => {
-        if (exists) {
+      return new Promise(async (resolve, reject) => {
+        try {
+          const head = await headFromS3(filename);
+          if (head) {
+            const awss3 = createAWSS3Client();
+            const stream = awss3
+              .getObject(params)
+              .createReadStream();
+  
+            // stream = s3client.downloadStream(params);
+            stream.pipe(outstream);
+            stream.on('error', (err) => {
+              msg = 'All attempts to download failed!';
+              error(msg);
+              error(err);
+              reject(msg);
+            });
+            stream.on('end', () => {
+              debug('Finished download of file.');
+              resolve(200);
+            });
+            // Also need to listen for close on outstream, to stop in case the request is aborted
+            // at client-side before the end of the input stream (S3 file).
+            outstream.on('close', () => {
+              debug('Outstream closed.');
+              resolve(499); // partial content
+            });
+          } else {
+            reject(404);
+          }
+        } catch (error) {
+          error('[downloadFromS3] the download failed', error);
+          reject(500);
+        }  
+      })
 
-          const stream = awss3
-            .getObject(params)
-            .createReadStream();
-
-          // stream = s3client.downloadStream(params);
-          stream.pipe(outstream);
-          stream.on('error', (err) => {
-            msg = 'All attempts to download failed!';
-            error(msg);
-            error(err);
-            deferred.reject(msg);
-          });
-          stream.on('end', () => {
-            debug('Finished download of file.');
-            deferred.resolve(200);
-          });
-          // Also need to listen for close on outstream, to stop in case the request is aborted
-          // at client-side before the end of the input stream (S3 file).
-          outstream.on('close', () => {
-            debug('Outstream closed.');
-            deferred.resolve();
-          });
-
-        } else {
-          deferred.reject(404);
-        }
-      }).catch((error) => {
-        deferred.reject(404);
-      });
-
-      return deferred.promise;
     }
 
     async function deleteFromS3(filenames) {
@@ -359,7 +361,6 @@ module.exports = {
             message: 'unable to download the file'
           }]
         });
-
       }
       // }
     }
@@ -791,7 +792,7 @@ module.exports = {
           binaryStream: true,
           beforeStreamingHandler: async (tx, sriRequest, customMapping) => {
             await checkSecurity(tx, sriRequest, null, 'read');
-            sriRequest.logDebug(sriRequest.params.filename);
+            sriRequest.logDebug('general', `[customRouteForDownload] trying to stream '${sriRequest.params.filename}' to the client`);
 
             let contentType = 'application/octet-stream';
 
@@ -808,7 +809,6 @@ module.exports = {
             };
           },
           streamingHandler: async (tx, sriRequest, stream) => {
-
             await handleFileDownload(tx, sriRequest, stream);
             sriRequest.logDebug('streaming download done');
           }
