@@ -444,7 +444,7 @@ exports = module.exports = {
            const resourceHref = getResourceForCopy(body.fileHref);
            resources.add(resourceHref);  
            const filename = body.fileHref.split('/attachments/').pop();
-           body.file = {tmpFileName : getTmpFilename(filename), filename};
+           body.file = {tmpFileName : getTmpFilename(filename), filename, mimetype : mime.contentType(filename)};
         });
         
         await checkSecurityForResources(tx, sriRequest, 'read', resources);
