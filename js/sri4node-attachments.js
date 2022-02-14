@@ -188,8 +188,8 @@ exports = module.exports = {
         if (exists) {
 
           const stream = awss3
-          .getObject(params)
-          .createReadStream()
+            .getObject(params)
+            .createReadStream()
 
           // stream = s3client.downloadStream(params);
           stream.pipe(outstream);
@@ -233,8 +233,8 @@ exports = module.exports = {
           Objects: objects
         }
       };
-      
-      
+
+
       await new Promise((accept, reject) => {
         awss3.deleteObjects(params, function (err, data) {
           if (err) { // an error occurred
@@ -246,7 +246,7 @@ exports = module.exports = {
           }
         });
       });
-      
+
     }
 
     async function checkExistence(files, sriRequest) {
@@ -286,7 +286,7 @@ exports = module.exports = {
       await deleteFromS3([tmpFileName]);
 
     }
-    
+
     async function copyFile(destionationFileName, sourceFileName, attachmentKey) {
       let awss3 = createAWSS3Client();
       let params = { Bucket: configuration.s3bucket, Key: destionationFileName, ACL: "bucket-owner-full-control", CopySource: encodeURI("/" + configuration.s3bucket + "/" + sourceFileName), MetadataDirective: "REPLACE", TaggingDirective: "COPY", Metadata: { "attachmentkey": attachmentKey } };
@@ -334,7 +334,7 @@ exports = module.exports = {
       } else if (href) { //for the copy
         const spl = href.split('/');
         const attInd = spl.indexOf('attachments');
-        name = spl[attInd-1]+'-'+spl[attInd+1];
+        name = spl[attInd - 1] + '-' + spl[attInd + 1];
       } else {
         name = sriRequest.params.key + '-' + sriRequest.params.filename; //get name from params for download.
       }
@@ -432,32 +432,39 @@ exports = module.exports = {
 
 
     }
-    
-    
-    async function copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy){
-      const toCopy =  bodyJson.filter(e=>e.fileHref);
+
+
+    async function copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy) {
+      const toCopy = bodyJson.filter(e => e.fileHref);
       if (toCopy.length) {
         sriRequest.logDebug('copy attachments');
         let resources = new Set();
 
         toCopy.forEach(body => {
-           const resourceHref = getResourceForCopy(body.fileHref);
-           resources.add(resourceHref);  
-           const filename = body.fileHref.split('/attachments/').pop();
-           body.file = {tmpFileName : getTmpFilename(filename), filename, mimetype : mime.contentType(filename)};
+          const resourceHref = getResourceForCopy(body.fileHref);
+          resources.add(resourceHref);
+          const filename = body.fileHref.split('/attachments/').pop();
+          body.file = { tmpFileName: getTmpFilename(filename), filename, mimetype: mime.contentType(filename) };
+
         });
-        
+
         await checkSecurityForResources(tx, sriRequest, 'read', resources);
-        
+
         let promises = [];
-        
+
         toCopy.forEach(body => {
           promises.push(getFileMeta(getS3FileName(undefined, undefined, undefined, body.fileHref)));
         });
-        
-        const results =  await Promise.all(promises);
-        
-        if (results.some(e=>e == null)) {
+
+        const results = await Promise.all(promises);
+
+        results.forEach((meta, index) => {
+          const fileObj = toCopy[index].file;
+          fileObj.hash = meta.ETag;
+          fileObj.size = meta.ContentLength;
+        });
+
+        if (results.some(e => e == null)) {
           throw new sriRequest.SriError({
             status: 409,
             errors: [{
@@ -467,16 +474,16 @@ exports = module.exports = {
             }]
           });
         }
-        
+
         toCopy.forEach(body => {
-          promises.push(copyFile(body.file.tmpFileName, getS3FileName(undefined, undefined, undefined, body.fileHref), body.attachment.key ));
+          promises.push(copyFile(body.file.tmpFileName, getS3FileName(undefined, undefined, undefined, body.fileHref), body.attachment.key));
         });
-        
+
         await Promise.all(promises);
-        
-        
+
+
       }
-      
+
     }
 
 
@@ -493,19 +500,19 @@ exports = module.exports = {
       }
       return true;
     }
-    
+
     async function checkSecurityForResources(tx, sriRequest, ability, resources) {
-        let security = configuration.security.plugin;
-        let attAbility = ability;
-        if (configuration.security.abilityPrepend)
-          attAbility = configuration.security.abilityPrepend + attAbility;
-        if (configuration.security.abilityAppend)
-          attAbility = attAbility + configuration.security.abilityAppend;
-        let t = [...resources];
-        await security.checkPermissionOnResourceList(tx, sriRequest, attAbility, t, undefined, true);
+      let security = configuration.security.plugin;
+      let attAbility = ability;
+      if (configuration.security.abilityPrepend)
+        attAbility = configuration.security.abilityPrepend + attAbility;
+      if (configuration.security.abilityAppend)
+        attAbility = attAbility + configuration.security.abilityAppend;
+      let t = [...resources];
+      await security.checkPermissionOnResourceList(tx, sriRequest, attAbility, t, undefined, true);
     }
 
-    function checkBodyJson(file, bodyJson, sriRequest) {
+    function checkBodyJsonForFile(file, bodyJson, sriRequest) {
       if (!bodyJson.some(e => e.file === file.filename))
         throw new sriRequest.SriError({
           status: 409,
@@ -517,6 +524,68 @@ exports = module.exports = {
         })
     }
 
+    function checkFileForBodyJson(bodyJson, sriRequest) {
+      //validate JSONs for each of the files
+      bodyJson.forEach(att => {
+        if (att.file !== undefined && !att.fileHref) {
+          att.file = sriRequest.attachmentsRcvd.find(attf => attf.filename === att.file);
+
+          if (att.file === undefined) {
+            throw new sriRequest.SriError({
+              status: 409,
+              errors: [{
+                code: 'missing.file',
+                type: 'ERROR',
+                message: 'file ' + att.file + ' was expected but not found'
+              }]
+            });
+          }
+        }
+      });
+    }
+
+    function validateRequestData(bodyJson, sriRequest) {
+
+      if (bodyJson.some(e => !e.attachment)) {
+        throw new sriRequest.SriError({
+          status: 409,
+          errors: [{
+            code: 'missing.json.body.attachment',
+            type: 'ERROR',
+            message: 'each json item needs an "attachment"'
+          }]
+        });
+      }
+
+      if (bodyJson.some(e => !e.attachment.key)) {
+        throw new sriRequest.SriError({
+          status: 409,
+          errors: [{
+            code: 'missing.json.attachment.key',
+            type: 'ERROR',
+            message: 'each attachment json needs a key'
+          }]
+        });
+      }
+
+      bodyJson.forEach(att => {
+        if (!att.resource || !att.resource.href) {
+          throw new sriRequest.SriError({
+            status: 409,
+            errors: [{
+              code: 'missing.json.body.resource',
+              type: 'ERROR',
+              message: 'each attachment json needs a resource'
+            }]
+          });
+        } else {
+          let chuncks = att.resource.href.split("/");
+          att.resource.key = chuncks[chuncks.length - 1];
+        }
+      });
+    }
+
+
     return {
       customRouteForUpload: function (runAfterUpload, getResourceForCopy) {
         return {
@@ -525,10 +594,10 @@ exports = module.exports = {
           readOnly: false,
           busBoy: true,
 
-          beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
+          beforeStreamingHandler: async (tx, sriRequest, customMapping) => {
 
           },
-          streamingHandler: async(tx, sriRequest, stream) => {
+          streamingHandler: async (tx, sriRequest, stream) => {
             sriRequest.attachmentsRcvd = [];
             sriRequest.fieldsRcvd = {};
 
@@ -558,12 +627,12 @@ exports = module.exports = {
 
                 tmpUploads.push(
                   uploadTmpFile(fileObj)
-                  .then((suc) => {})
-                  .catch((ex) => {
-                    sriRequest.logDebug("uploadTmpFile failed");
-                    sriRequest.logDebug(ex);
-                    failed.push(ex);
-                  })
+                    .then((suc) => { })
+                    .catch((ex) => {
+                      sriRequest.logDebug("uploadTmpFile failed");
+                      sriRequest.logDebug(ex);
+                      failed.push(ex);
+                    })
                 );
 
                 sriRequest.attachmentsRcvd.push(fileObj);
@@ -584,6 +653,8 @@ exports = module.exports = {
             sriRequest.logDebug("tmp uploads done");
 
             let bodyJson = sriRequest.fieldsRcvd.body;
+            let securityError;
+            let renames = [];
 
             if (bodyJson === undefined) {
               throw new sriRequest.SriError({
@@ -600,151 +671,86 @@ exports = module.exports = {
                 bodyJson = [bodyJson];
             }
 
+            validateRequestData(bodyJson, sriRequest);
 
-            let securityError;
-            let renames = [];
-            
+            sriRequest.attachmentsRcvd.forEach(file => checkBodyJsonForFile(file, bodyJson, sriRequest));
 
-            // if (!securityError) {
+            sriRequest.attachmentsRcvd.forEach(file => file.mimetype = mime.contentType(file.filename));
 
-              if (bodyJson.some(e => !e.attachment)) {
-                throw new sriRequest.SriError({
-                  status: 409,
-                  errors: [{
-                    code: 'missing.json.body.attachment',
-                    type: 'ERROR',
-                    message: 'each json item needs an "attachment"'
-                }]
-                });
-              }
+            if (getResourceForCopy) {
 
+              await copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy);
 
-              if (bodyJson.some(e => !e.attachment.key)) {
-                throw new sriRequest.SriError({
-                  status: 409,
-                  errors: [{
-                    code: 'missing.json.attachment.key',
-                    type: 'ERROR',
-                    message: 'each attachment json needs a key'
-                }]
-                });
-              }
+            }
 
-              sriRequest.attachmentsRcvd.forEach(file => checkBodyJson(file, bodyJson, sriRequest));
+            checkFileForBodyJson(bodyJson, sriRequest);
 
-              sriRequest.attachmentsRcvd.forEach(file => file.mimetype = mime.contentType(file.filename));
-
-              bodyJson.forEach(att => {
-                if (!att.resource || !att.resource.href) {
-                  throw new sriRequest.SriError({
-                    status: 409,
-                    errors: [{
-                      code: 'missing.json.body.resource',
-                      type: 'ERROR',
-                      message: 'each attachment json needs a resource'
-                  }]
-                  });
-                } else {
-                  let chuncks = att.resource.href.split("/");
-                  att.resource.key = chuncks[chuncks.length - 1];
-                }
-              });
-
-              if (getResourceForCopy) {
-
-                await copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy);
-              
-              }
-
-              const handleTheFile = async function (att) {
-                // if (att.file)
-                //   await handleFileUpload(att, sriRequest);
-                await runAfterUpload(tx, sriRequest, att);
-                //throw "damn";
-                return att;
-              };
-
-              //validate JSONs for each of the files
-              bodyJson.forEach(att => {
-                if (att.file !== undefined && !att.fileHref) {
-                  // sriRequest.logDebug(att.file);
-                  att.file = sriRequest.attachmentsRcvd.find(attf => attf.filename === att.file);
-
-                  if (att.file === undefined) {
-                    throw new sriRequest.SriError({
-                      status: 409,
-                      errors: [{
-                        code: 'missing.file',
-                        type: 'ERROR',
-                        message: 'file ' + att.file + ' was expected but not found'
-                    }]
-                    });
-                  }
-                  // else {
-                  //   att.file.s3filename = getS3FileName(sriRequest, att);
-                  // }
-                }
-
-              });
+            const handleTheFile = async function (att) {
+              // if (att.file)
+              //   await handleFileUpload(att, sriRequest);
+              await runAfterUpload(tx, sriRequest, att);
+              //throw "damn";
+              return att;
+            };
 
             if (config.checkFileExistence) {
               await checkExistence(bodyJson.filter(e => e.file !== undefined), sriRequest);
             }
 
-              //add uploads to the queue
-              if (!config.handleMultipleUploadsTogether) {
-                if (config.uploadInSequence) {
-                  // For example Persons Api which uses an sri4node as a proxy for its attachments files should be sequentially uploaded
-                  for(let file of bodyJson) {
-                    await handleTheFile(file)
-                      .then((suc) => {
-                        debug("handleFile success");
-                      })
-                      .catch((ex) => {
-                        sriRequest.logDebug("handlefile failed");
-                        sriRequest.logDebug(ex);
-                        failed.push(ex);
-                      });
-                  }
-                } else {
-                  let uploads = [];
-                  
-                  bodyJson.forEach(file => {
-                    uploads.push(
-                      handleTheFile(file)
-                      .then((suc) => {
-                        debug("handleFile success");
-                      })
-                      .catch((ex) => {
-                        sriRequest.logDebug("handlefile failed");
-                        sriRequest.logDebug(ex);
-                        failed.push(ex);
-                      })
-                    );
-                  });
-                  await Promise.all(uploads);
+            //add uploads to the queue
+            if (!config.handleMultipleUploadsTogether) {
+              if (config.uploadInSequence) {
+                // For example Persons Api which uses an sri4node as a proxy for its attachments files should be sequentially uploaded
+                for (let file of bodyJson) {
+                  await handleTheFile(file)
+                    .then((suc) => {
+                      debug("handleFile success");
+                    })
+                    .catch((ex) => {
+                      sriRequest.logDebug("handlefile failed");
+                      sriRequest.logDebug(ex);
+                      failed.push(ex);
+                    });
                 }
               } else {
-                await handleTheFile(bodyJson)
-                  .then((suc) => {
-                    debug("handleFile success");
-                  })
-                  .catch((ex) => {
-                    sriRequest.logDebug("handlefile failed");
-                    sriRequest.logDebug(ex);
-                    failed.push(ex);
-                  });
+                let uploads = [];
+
+                bodyJson.forEach(file => {
+                  uploads.push(
+                    handleTheFile(file)
+                      .then((suc) => {
+                        debug("handleFile success");
+                      })
+                      .catch((ex) => {
+                        sriRequest.logDebug("handlefile failed");
+                        sriRequest.logDebug(ex);
+                        failed.push(ex);
+                      })
+                  );
+                });
+                await Promise.all(uploads);
               }
+            } else {
+              await handleTheFile(bodyJson)
+                .then((suc) => {
+                  debug("handleFile success");
+                })
+                .catch((ex) => {
+                  sriRequest.logDebug("handlefile failed");
+                  sriRequest.logDebug(ex);
+                  failed.push(ex);
+                });
+            }
 
             // }
-            
+
             ///now that we validated the json body resource requirement, we can finally check security.....
             try {
               await checkSecurity(tx, sriRequest, bodyJson, 'create');
             } catch (error) {
               securityError = error;
             }
-            
+
             ///all files are now uploaded into their TMP versions.
 
             if (failed.length > 0 || securityError) { ///something failed. delete all tmp files
@@ -790,15 +796,169 @@ exports = module.exports = {
         }
       },
 
+      customRouteForUploadCopy: function (runAfterUpload, getResourceForCopy) {
+        return {
+          routePostfix: '/attachments/copy',
+          httpMethods: ['POST'],
+          readOnly: false,
+
+          handler: async (tx, sriRequest) => {
+            sriRequest.attachmentsRcvd = [];
+            sriRequest.fieldsRcvd = {};
+
+            let failed = [];
+
+            sriRequest.fieldsRcvd.body = sriRequest.body;
+
+            let bodyJson = sriRequest.fieldsRcvd.body;
+
+            if (bodyJson === undefined) {
+              throw new sriRequest.SriError({
+                status: 409,
+                errors: [{
+                  code: 'missing.body',
+                  type: 'ERROR',
+                  message: 'Body is required.'
+                }]
+              });
+            } else {
+              if (!Array.isArray(bodyJson))
+                bodyJson = [bodyJson];
+            }
+
+
+            let securityError;
+            let renames = [];
+
+            validateRequestData(bodyJson, sriRequest);
+
+            if (getResourceForCopy) {
+
+              await copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy);
+
+            }
+
+            checkFileForBodyJson(bodyJson, sriRequest);
+            
+            const handleTheFile = async function (att) {
+              // if (att.file)
+              //   await handleFileUpload(att, sriRequest);
+              await runAfterUpload(tx, sriRequest, att);
+              //throw "damn";
+              return att;
+            };
+
+            if (config.checkFileExistence) {
+              await checkExistence(bodyJson.filter(e => e.file !== undefined), sriRequest);
+            }
+
+            //add uploads to the queue
+            if (!config.handleMultipleUploadsTogether) {
+              if (config.uploadInSequence) {
+                // For example Persons Api which uses an sri4node as a proxy for its attachments files should be sequentially uploaded
+                for (let file of bodyJson) {
+                  await handleTheFile(file)
+                    .then((suc) => {
+                      debug("handleFile success");
+                    })
+                    .catch((ex) => {
+                      sriRequest.logDebug("handlefile failed");
+                      sriRequest.logDebug(ex);
+                      failed.push(ex);
+                    });
+                }
+              } else {
+                let uploads = [];
+
+                bodyJson.forEach(file => {
+                  uploads.push(
+                    handleTheFile(file)
+                      .then((suc) => {
+                        debug("handleFile success");
+                      })
+                      .catch((ex) => {
+                        sriRequest.logDebug("handlefile failed");
+                        sriRequest.logDebug(ex);
+                        failed.push(ex);
+                      })
+                  );
+                });
+                await Promise.all(uploads);
+              }
+            } else {
+              await handleTheFile(bodyJson)
+                .then((suc) => {
+                  debug("handleFile success");
+                })
+                .catch((ex) => {
+                  sriRequest.logDebug("handlefile failed");
+                  sriRequest.logDebug(ex);
+                  failed.push(ex);
+                });
+            }
+
+            // }
+
+            ///now that we validated the json body resource requirement, we can finally check security.....
+            try {
+              await checkSecurity(tx, sriRequest, bodyJson, 'create');
+            } catch (error) {
+              securityError = error;
+            }
+
+            ///all files are now uploaded into their TMP versions.
+
+            if (failed.length > 0 || securityError) { ///something failed. delete all tmp files
+              ///delete attachments again
+              sriRequest.logDebug("something went wrong during upload/afterupload");
+              // let s3client = createS3Client(configuration);
+
+              let filenames = sriRequest.attachmentsRcvd.filter(e => e.tmpFileName).map(e => e.tmpFileName);
+
+              if (filenames.length) {
+                try {
+                  await deleteFromS3(filenames);
+                  sriRequest.logDebug(filenames.join(" & ") + " deleted");
+                } catch (err) {
+                  sriRequest.logDebug("delete rollback failed");
+                  sriRequest.logDebug(err);
+                }
+              }
+
+              if (securityError) throw securityError;
+
+              throw failed;
+              //stream.push(failed);
+            } else {
+              /// all went well, rename the files to their real names now.
+              bodyJson.filter(e => e.file !== undefined).forEach(file => {
+                renames.push(
+                  renameFile(file)
+                );
+
+              });
+
+              await Promise.all(renames);
+
+              let response = [];
+              bodyJson.forEach(file => {
+                response.push({ status: 200, href: file.resource.href + "/attachments/" + file.attachment.key });
+              });
+              return response;
+            }
+          }
+        }
+      },
+
       customRouteForPreSignedUpload: function () {
         return {
           routePostfix: '/attachments/presigned',
           httpMethods: ['GET'],
           readOnly: true,
-          beforeHandler: async(tx, sriRequest) => {
+          beforeHandler: async (tx, sriRequest) => {
             // await checkSecurity(tx, sriRequest, null, 'create');
           },
-          handler: async(tx, sriRequest) => {
+          handler: async (tx, sriRequest) => {
             ///dp the presigned request to s3
             let json = await getPreSigned();
             return {
@@ -817,7 +977,7 @@ exports = module.exports = {
           httpMethods: ['GET'],
           readOnly: true,
           binaryStream: true,
-          beforeStreamingHandler: async(tx, sriRequest, customMapping) => {
+          beforeStreamingHandler: async (tx, sriRequest, customMapping) => {
             await checkSecurity(tx, sriRequest, null, 'read');
             sriRequest.logDebug(sriRequest.params.filename);
 
@@ -836,7 +996,7 @@ exports = module.exports = {
               headers: headers
             }
           },
-          streamingHandler: async(tx, sriRequest, stream) => {
+          streamingHandler: async (tx, sriRequest, stream) => {
 
             await handleFileDownload(tx, sriRequest, stream);
             sriRequest.logDebug('streaming download done');
@@ -849,17 +1009,17 @@ exports = module.exports = {
           routePostfix: '/:key/attachments/:attachmentKey',
           readOnly: false,
           httpMethods: ['DELETE'],
-          beforeHandler: async(tx, sriRequest) => {
+          beforeHandler: async (tx, sriRequest) => {
             await checkSecurity(tx, sriRequest, null, 'delete');
           },
-          handler: async(tx, sriRequest) => {
+          handler: async (tx, sriRequest) => {
             let filename = await getFileNameHandler(tx, sriRequest, sriRequest.params.key, sriRequest.params.attachmentKey);
             await handleFileDelete(tx, sriRequest, filename);
             return {
               status: 204
             }
           },
-          afterHandler: async(tx, sriRequest) => {
+          afterHandler: async (tx, sriRequest) => {
             await afterHandler(tx, sriRequest, sriRequest.params.key, sriRequest.params.attachmentKey)
           }
         };
@@ -870,10 +1030,10 @@ exports = module.exports = {
           routePostfix: '/:key/attachments/:attachmentKey',
           httpMethods: ['GET'],
           readOnly: true,
-          beforeHandler: async(tx, sriRequest) => {
+          beforeHandler: async (tx, sriRequest) => {
             await checkSecurity(tx, sriRequest, null, 'read');
           },
-          handler: async(tx, sriRequest) => {
+          handler: async (tx, sriRequest) => {
             return {
               body: await getAttJson(tx, sriRequest, sriRequest.params.key, sriRequest.params.attachmentKey),
               status: 200
