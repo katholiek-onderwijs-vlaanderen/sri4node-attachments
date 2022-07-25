@@ -34,6 +34,7 @@ describe('sri4node-attachments : ', function () {
 
   require('./testPartyAttachments.js')(base, '/partiesFolder');
   require('./testPartyAttachments.js')(base, '/partiesS3');
+  require('../test/unitTests.js');
 
 //  require('./testIsolated.js')(base, '/partiesS3');
 });

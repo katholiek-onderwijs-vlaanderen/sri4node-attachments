@@ -10,6 +10,25 @@ const pEvent = require('p-event');
 const S3 = require('aws-sdk/clients/s3');
 const mime = require('mime-types');
 
+/**
+ * Cleans up a filename before uploading it to S3.
+ * First it is decoded in case it contains any encoded characters (eg %21 -> !).
+ * Then any special characters are replaced according to these guidelines: https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html
+ * @param {String} filename 
+ */
+    function getSafeFilename(filename) {
+        try {
+            const decodedFilename = decodeURIComponent(filename);
+            return decodedFilename.replace(/[^a-zA-Z0-9\-!_.*'()]/g,'_');
+        } catch(error) {
+            if(error instanceof URIError) {
+                // Decoding probably failed because of the percent character, try again
+                return getSafeFilename(filename.replace('%', '_'));
+            }
+            throw error;
+        }
+}
+
 exports = module.exports = {
   configure: function (config) {
     'use strict';
@@ -112,8 +131,6 @@ exports = module.exports = {
         maxRetries: configuration.maxRetries
       })
     }
-
-
 
     // function createS3Client() {
     //   var s3key = configuration.s3key; // eslint-disable-line
@@ -585,7 +602,6 @@ exports = module.exports = {
       });
     }
 
-
     return {
       customRouteForUpload: function (runAfterUpload, getResourceForCopy) {
         return {
@@ -618,12 +634,13 @@ exports = module.exports = {
 
             sriRequest.busBoy.on('file',
               async function (fieldname, file, filename, encoding, mimetype) {
+                const safeFilename = getSafeFilename(filename);
 
-                sriRequest.logDebug('File [' + fieldname + ']: filename: ' + filename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
+                sriRequest.logDebug('File [' + fieldname + ']: filename: ' + safeFilename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
 
-                let fileObj = ({ filename, mimetype, file, fields: {} });
+                let fileObj = ({ safeFilename, mimetype, file, fields: {} });
 
-                fileObj.tmpFileName = getTmpFilename(filename);
+                fileObj.tmpFileName = getTmpFilename(safeFilename);
 
                 tmpUploads.push(
                   uploadTmpFile(fileObj)
