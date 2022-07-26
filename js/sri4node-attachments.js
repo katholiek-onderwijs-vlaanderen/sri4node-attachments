@@ -638,7 +638,7 @@ exports = module.exports = {
 
                 sriRequest.logDebug('File [' + fieldname + ']: filename: ' + safeFilename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
 
-                let fileObj = ({ safeFilename, mimetype, file, fields: {} });
+                let fileObj = ({ filename: safeFilename, mimetype, file, fields: {} });
 
                 fileObj.tmpFileName = getTmpFilename(safeFilename);
 
