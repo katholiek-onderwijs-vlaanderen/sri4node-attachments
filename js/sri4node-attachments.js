@@ -690,6 +690,16 @@ exports = module.exports = {
 
             validateRequestData(bodyJson, sriRequest);
 
+            // Filename: replace special characters with underscore
+            bodyJson.forEach(b => {
+                if (b.file) {
+                    b.file = getSafeFilename(b.file);
+                }
+                if (b.attachment.name) {
+                    b.attachment.name = getSafeFilename(b.attachment.name);
+                }
+            });
+
             sriRequest.attachmentsRcvd.forEach(file => checkBodyJsonForFile(file, bodyJson, sriRequest));
 
             sriRequest.attachmentsRcvd.forEach(file => file.mimetype = mime.contentType(file.filename));
