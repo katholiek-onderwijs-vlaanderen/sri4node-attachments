@@ -16,17 +16,17 @@ const mime = require('mime-types');
  * Then any special characters are replaced according to these guidelines: https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html
  * @param {String} filename 
  */
-    function getSafeFilename(filename) {
-        try {
-            const decodedFilename = decodeURIComponent(filename);
-            return decodedFilename.replace(/[^a-zA-Z0-9\-!_.*'()]/g,'_');
-        } catch(error) {
-            if(error instanceof URIError) {
-                // Decoding probably failed because of the percent character, try again
-                return getSafeFilename(filename.replace('%', '_'));
-            }
-            throw error;
-        }
+function getSafeFilename(filename) {
+  try {
+    const decodedFilename = decodeURIComponent(filename);
+    return decodedFilename.replace(/[^a-zA-Z0-9\-!_.*'()]/g, '_');
+  } catch (error) {
+    if (error instanceof URIError) {
+      // Decoding probably failed because of the percent character, try again
+      return getSafeFilename(filename.replace('%', '_'));
+    }
+    throw error;
+  }
 }
 
 exports = module.exports = {
@@ -452,7 +452,7 @@ exports = module.exports = {
 
 
     async function copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy) {
-      const toCopy = bodyJson.filter(e => e.fileHref);
+      let toCopy = bodyJson.filter(e => e.fileHref);
       if (toCopy.length) {
         sriRequest.logDebug('copy attachments');
         let resources = new Set();
@@ -461,8 +461,11 @@ exports = module.exports = {
           const resourceHref = getResourceForCopy(body.fileHref);
           resources.add(resourceHref);
           const filename = body.fileHref.split('/attachments/').pop();
-          body.file = { tmpFileName: getTmpFilename(filename), filename, mimetype: mime.contentType(filename) };
-
+          body.file = {
+            tmpFileName: getTmpFilename(filename),
+            filename,
+            mimetype: mime.contentType(filename)
+          };
         });
 
         await checkSecurityForResources(tx, sriRequest, 'read', resources);
@@ -475,13 +478,20 @@ exports = module.exports = {
 
         const results = await Promise.all(promises);
 
-        results.forEach((meta, index) => {
-          const fileObj = toCopy[index].file;
-          fileObj.hash = meta.ETag;
-          fileObj.size = meta.ContentLength;
-        });
+        // Set meta fields and handle not found files
+        toCopy = toCopy.filter((tc, index) => {
+          const meta = results[index];
+          if (meta) {
+            const fileObj = tc.file;
+            fileObj.hash = meta.ETag;
+            fileObj.size = meta.ContentLength;
+            return true;
+          }
 
-        if (results.some(e => e == null)) {
+          if (tc.ignoreNotFound) {
+            return false;
+          }
+
           throw new sriRequest.SriError({
             status: 409,
             errors: [{
@@ -490,7 +500,7 @@ exports = module.exports = {
               message: 'One or more of the files to copy can not be found'
             }]
           });
-        }
+        });
 
         toCopy.forEach(body => {
           promises.push(copyFile(body.file.tmpFileName, getS3FileName(undefined, undefined, undefined, body.fileHref), body.attachment.key));
@@ -498,9 +508,9 @@ exports = module.exports = {
 
         await Promise.all(promises);
 
-
+        // Remove the not found files from the bodyJson
+        return bodyJson.filter(bj => !bj.fileHref || toCopy.some(tc => tc.fileHref === bj.fileHref));
       }
-
     }
 
 
@@ -519,6 +529,9 @@ exports = module.exports = {
     }
 
     async function checkSecurityForResources(tx, sriRequest, ability, resources) {
+      if (!resources.size) {
+        return;
+      }
       let security = configuration.security.plugin;
       let attAbility = ability;
       if (configuration.security.abilityPrepend)
@@ -562,7 +575,6 @@ exports = module.exports = {
     }
 
     function validateRequestData(bodyJson, sriRequest) {
-
       if (bodyJson.some(e => !e.attachment)) {
         throw new sriRequest.SriError({
           status: 409,
@@ -692,12 +704,12 @@ exports = module.exports = {
 
             // Filename: replace special characters with underscore
             bodyJson.forEach(b => {
-                if (b.file) {
-                    b.file = getSafeFilename(b.file);
-                }
-                if (b.attachment.name) {
-                    b.attachment.name = getSafeFilename(b.attachment.name);
-                }
+              if (b.file) {
+                b.file = getSafeFilename(b.file);
+              }
+              if (b.attachment.name) {
+                b.attachment.name = getSafeFilename(b.attachment.name);
+              }
             });
 
             sriRequest.attachmentsRcvd.forEach(file => checkBodyJsonForFile(file, bodyJson, sriRequest));
@@ -705,9 +717,7 @@ exports = module.exports = {
             sriRequest.attachmentsRcvd.forEach(file => file.mimetype = mime.contentType(file.filename));
 
             if (getResourceForCopy) {
-
-              await copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy);
-
+              bodyJson = await copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy);
             }
 
             checkFileForBodyJson(bodyJson, sriRequest);
@@ -853,20 +863,17 @@ exports = module.exports = {
                 bodyJson = [bodyJson];
             }
 
-
             let securityError;
             let renames = [];
 
             validateRequestData(bodyJson, sriRequest);
 
             if (getResourceForCopy) {
-
-              await copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy);
-
+              bodyJson = await copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy);
             }
 
             checkFileForBodyJson(bodyJson, sriRequest);
-            
+
             const handleTheFile = async function (att) {
               // if (att.file)
               //   await handleFileUpload(att, sriRequest);
