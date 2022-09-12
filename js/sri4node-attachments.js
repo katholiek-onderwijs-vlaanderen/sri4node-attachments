@@ -9,6 +9,7 @@ var debug = common.debug;
 const pEvent = require('p-event');
 const S3 = require('aws-sdk/clients/s3');
 const mime = require('mime-types');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * Cleans up a filename before uploading it to S3.
@@ -288,7 +289,7 @@ exports = module.exports = {
     }
 
     function getTmpFilename(filename) {
-      return (new Date().getTime()) + '-' + filename + '.tmp';
+      return uuidv4() + '-' + filename + '.tmp';
     }
 
 
