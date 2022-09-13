@@ -454,64 +454,65 @@ exports = module.exports = {
 
     async function copyAttachments(tx, sriRequest, bodyJson, getResourceForCopy) {
       let toCopy = bodyJson.filter(e => e.fileHref);
-      if (toCopy.length) {
-        sriRequest.logDebug('copy attachments');
-        let resources = new Set();
+      if (!toCopy.length)
+        return bodyJson;
 
-        toCopy.forEach(body => {
-          const resourceHref = getResourceForCopy(body.fileHref);
-          resources.add(resourceHref);
-          const filename = body.fileHref.split('/attachments/').pop();
-          body.file = {
-            tmpFileName: getTmpFilename(filename),
-            filename,
-            mimetype: mime.contentType(filename)
-          };
+      sriRequest.logDebug('copy attachments');
+      let resources = new Set();
+
+      toCopy.forEach(body => {
+        const resourceHref = getResourceForCopy(body.fileHref);
+        resources.add(resourceHref);
+        const filename = body.fileHref.split('/attachments/').pop();
+        body.file = {
+          tmpFileName: getTmpFilename(filename),
+          filename,
+          mimetype: mime.contentType(filename)
+        };
+      });
+
+      await checkSecurityForResources(tx, sriRequest, 'read', resources);
+
+      let promises = [];
+
+      toCopy.forEach(body => {
+        promises.push(getFileMeta(getS3FileName(undefined, undefined, undefined, body.fileHref)));
+      });
+
+      const results = await Promise.all(promises);
+
+      // Set meta fields and handle not found files
+      toCopy = toCopy.filter((tc, index) => {
+        const meta = results[index];
+        if (meta) {
+          const fileObj = tc.file;
+          fileObj.hash = meta.ETag;
+          fileObj.size = meta.ContentLength;
+          return true;
+        }
+
+        if (tc.ignoreNotFound) {
+          return false;
+        }
+
+        throw new sriRequest.SriError({
+          status: 409,
+          errors: [{
+            code: 'file.to.copy.not.found',
+            type: 'ERROR',
+            message: 'One or more of the files to copy can not be found'
+          }]
         });
+      });
 
-        await checkSecurityForResources(tx, sriRequest, 'read', resources);
+      toCopy.forEach(body => {
+        promises.push(copyFile(body.file.tmpFileName, getS3FileName(undefined, undefined, undefined, body.fileHref), body.attachment.key));
+      });
 
-        let promises = [];
+      await Promise.all(promises);
 
-        toCopy.forEach(body => {
-          promises.push(getFileMeta(getS3FileName(undefined, undefined, undefined, body.fileHref)));
-        });
-
-        const results = await Promise.all(promises);
-
-        // Set meta fields and handle not found files
-        toCopy = toCopy.filter((tc, index) => {
-          const meta = results[index];
-          if (meta) {
-            const fileObj = tc.file;
-            fileObj.hash = meta.ETag;
-            fileObj.size = meta.ContentLength;
-            return true;
-          }
-
-          if (tc.ignoreNotFound) {
-            return false;
-          }
-
-          throw new sriRequest.SriError({
-            status: 409,
-            errors: [{
-              code: 'file.to.copy.not.found',
-              type: 'ERROR',
-              message: 'One or more of the files to copy can not be found'
-            }]
-          });
-        });
-
-        toCopy.forEach(body => {
-          promises.push(copyFile(body.file.tmpFileName, getS3FileName(undefined, undefined, undefined, body.fileHref), body.attachment.key));
-        });
-
-        await Promise.all(promises);
-
-        // Remove the not found files from the bodyJson
-        return bodyJson.filter(bj => !bj.fileHref || toCopy.some(tc => tc.fileHref === bj.fileHref));
-      }
+      // Remove the not found files from the bodyJson
+      return bodyJson.filter(bj => !bj.fileHref || toCopy.some(tc => tc.fileHref === bj.fileHref));
     }
 
 
