@@ -1,0 +1,11 @@
+#!/bin/sh
+
+if [[ $(git reflog -1) == *"merge test: Fast-forward"* ]]
+then
+    echo "-----------"
+    echo "RED ALERT!"
+    echo "-----------"
+    echo "You just merged test into another branch."
+    echo "Please undo the merge."
+    exit 1
+fi
