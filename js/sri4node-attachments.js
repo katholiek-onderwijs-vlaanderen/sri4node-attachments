@@ -354,7 +354,7 @@ exports = module.exports = {
         const attInd = spl.indexOf('attachments');
         name = spl[attInd - 1] + '-' + spl[attInd + 1];
       } else {
-        name = sriRequest.params.key + '-' + sriRequest.params.filename; //get name from params for download.
+        name = sriRequest.params.key + '-' + getSafeFilename(sriRequest.params.filename); //get name from params for download.
       }
       return name;
     }
@@ -652,7 +652,13 @@ exports = module.exports = {
 
                 sriRequest.logDebug('File [' + fieldname + ']: filename: ' + safeFilename + ', encoding: ' + encoding + ', mimetype: ' + mimetype);
 
-                let fileObj = ({ filename: safeFilename, mimetype, file, fields: {} });
+                let fileObj = {
+                  filename: safeFilename,
+                  originalFilename: filename,
+                  mimetype,
+                  file,
+                  fields: {}
+                };
 
                 fileObj.tmpFileName = getTmpFilename(safeFilename);
 
