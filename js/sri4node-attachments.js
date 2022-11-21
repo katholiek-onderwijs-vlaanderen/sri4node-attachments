@@ -353,47 +353,36 @@ exports = module.exports = {
         const spl = href.split('/');
         const attInd = spl.indexOf('attachments');
         name = spl[attInd - 1] + '-' + spl[attInd + 1];
-      } else {
-        name = sriRequest.params.key + '-' + getSafeFilename(sriRequest.params.filename); //get name from params for download.
-      }
+      } 
       return name;
     }
 
-    async function handleFileDownload(tx, sriRequest, stream) {
-
-      // var s3client = createS3Client(configuration);
-      var remoteFilename;
-      var localFilename;
-      var exists;
-      var msg;
-
-
-      // if (s3client) {
-      remoteFilename = getS3FileName(sriRequest);
-      debug('Download ' + remoteFilename);
+    async function handleFileDownload(tx, sriRequest, stream, isRetry) {
+      const filename = sriRequest.params.filename;
+      const safeFilename = getSafeFilename(filename);
+      const remoteFilename = `${sriRequest.params.key}-${isRetry ? filename : safeFilename}`;
       try {
-        let status = await downloadFromS3(stream, remoteFilename)
-
+        const status = await downloadFromS3(stream, remoteFilename);
       } catch (err) {
-
-        // File was streamed to client.
         if (err === 404) {
-          throw new sriRequest.SriError({
-            status: 404
-          })
-        }
-
-        throw new sriRequest.SriError({
-          status: 500,
-          errors: [{
-            code: 'download.failed',
-            type: 'ERROR',
-            message: 'unable to download the file'
-          }]
-        })
-
+            if (isRetry || filename === safeFilename) {
+                throw new sriRequest.SriError({
+                  status: 404
+                  });
+              }
+            // Retry with the original filename if there's a difference
+            await handleFileDownload(tx, sriRequest, stream, true);
+          } else {
+            throw new sriRequest.SriError({
+              status: 500,
+              errors: [{
+                code: 'download.failed',
+                type: 'ERROR',
+                message: 'unable to download the file'
+              }]
+              });
+          }
       }
-      // }
     }
 
     async function handleFileDelete(tx, sriRequest, filename) {
