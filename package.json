@@ -10,13 +10,15 @@
     "lint": "eslint sri4node-attachments.js js test"
   },
   "dependencies": {
-    "mime-types": "^2.1.21",
-    "q": "^1.0.1",
     "aws-sdk": "2.814.0",
-    "uuid": "2.0.x",
+    "mime-types": "^2.1.21",
     "p-event": "^2.0.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "eslint": "^8.8.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.25.4"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node-attachments.git"
