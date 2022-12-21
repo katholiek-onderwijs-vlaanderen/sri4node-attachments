@@ -1,6 +1,6 @@
 {
   "name": "sri4node-attachments",
-"version": "2.0.27",
+  "version": "2.0.27",
   "description": "A standard implementation to support attachments on sri4node resources.",
   "main": "js/sri4node-attachments.js",
   "scripts": {
@@ -10,16 +10,20 @@
     "lint": "eslint sri4node-attachments.js js test"
   },
   "dependencies": {
-    "mime-types": "^2.1.21",
-    "q": "^1.0.1",
     "aws-sdk": "2.814.0",
-    "uuid": "2.0.x",
-    "p-event": "^2.0.0"
+    "mime-types": "^2.1.21",
+    "p-event": "^2.0.0",
+    "q": "^1.0.1",
+    "uuid": "2.0.x"
   },
-"devDependencies": {
+  "devDependencies": {
+    "eslint": "^8.30.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.26.0",
     "mocha": "^8.0.0",
-    "rewire": "^6.0.0"
-},
+    "rewire": "^6.0.0",
+    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.12"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node-attachments.git"
