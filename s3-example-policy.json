@@ -1,25 +1,23 @@
 {
-	"Id": "Policy1451161695440",
-	"Version": "2012-10-17",
-	"Statement": [
-		{
-			"Sid": "Stmt1451161694089",
-			"Action": [
-				"s3:DeleteObject",
-				"s3:GetObject",
-				"s3:ListBucket",
-				"s3:PutObject"
-			],
-			"Effect": "Allow",
-			"Resource": [
-				"arn:aws:s3:::inner-gerbil-test/*",
-				"arn:aws:s3:::inner-gerbil-test"
-			],
-			"Principal": {
-				"AWS": [
-					"arn:aws:iam::435122894399:user/innergerbil"
-				]
-			}
-		}
-	]
+  "Id": "Policy1451161695440",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Stmt1451161694089",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:PutObject"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "arn:aws:s3:::inner-gerbil-test/*",
+        "arn:aws:s3:::inner-gerbil-test"
+      ],
+      "Principal": {
+        "AWS": ["arn:aws:iam::435122894399:user/innergerbil"]
+      }
+    }
+  ]
 }

@@ -1,0 +1,51 @@
+version: "3.8"
+
+services:
+  localstack:
+    # YOU CAN EASILY RUN awscli commands directly inside the localstack container:
+    # docker compose -f ./test/docker-compose.yml exec localstack  awslocal s3api create-bucket --bucket tests3bucket
+    # docker compose -f ./test/docker-compose.yml exec localstack  awslocal s3 ls # show all existing s3 buckets
+    # docker compose -f ./test/docker-compose.yml exec localstack  awslocal s3 lsawslocal s3 ls tests3bucket # show all files available in tests3bucket
+    container_name: "${LOCALSTACK_DOCKER_NAME-localstack-for-testing-sri4node-attachments}"
+    image: localstack/localstack
+    ports:
+      - 4566:4566 # LocalStack Gateway
+      - 4510-4559:4510-4559 # external services port range
+    environment:
+      - DEBUG=1 # ${DEBUG-}
+      - LAMBDA_EXECUTOR=local # local|docker|docker-reuse # ${LAMBDA_EXECUTOR-}
+      # - DOCKER_HOST=unix:///var/run/docker.sock
+      # cfr. https://docs.localstack.cloud/getting-started/faq/#why-cant-my-other-docker-containers-reach-localstack
+      - HOSTNAME_EXTERNAL=localhost.localstack.cloud
+      # - PROVIDER_OVERRIDE_S3=asf
+    # volumes:
+    #   - "${LOCALSTACK_VOLUME_DIR:-./volume}:/var/lib/localstack"
+    #   - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      default:
+        aliases:
+          # cfr. https://docs.localstack.cloud/getting-started/faq/#why-cant-my-other-docker-containers-reach-localstack
+          - localhost.localstack.cloud # also see environment.HOSTNAME_EXTERNAL !
+    depends_on:
+      - postgres
+  ### the next service is not needed since localstack already contains aws and awslocal CLI
+  # awscli:
+  #   build:
+  #     dockerfile: Dockerfile
+  #     target: awscli
+  #   # because of ```stdin_open: true``` and/or ```tty: true``` the aws-cli container (which has 'aws' as entrypoint which exits immediately) will keep running, so that we can run 'docker compose exec awscli bash'
+  #   stdin_open: true
+  #   tty: true
+  #   # image: amazon/aws-cli
+  #   # entrypoint: /bin/bash
+  #   # command: /bin/bash
+  postgres:
+    image: postgres:11
+    ports:
+      # expose docker port 5432 on localhost:15435
+      - 15435:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./docker-postgres-initdb:/docker-entrypoint-initdb.d

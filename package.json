@@ -4,25 +4,36 @@
   "description": "A standard implementation to support attachments on sri4node resources.",
   "main": "js/sri4node-attachments.js",
   "scripts": {
-    "test": "mocha",
+    "pretest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml up --wait && sleep 3 && docker compose -f ./test/docker-compose.yml exec localstack  awslocal s3api create-bucket --bucket tests3bucket",
+    "test": "mocha --timeout 5000 test/tests.js",
+    "posttest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml down --volumes --rmi=local --remove-orphans",
     "test-dev": "env $(cat .env) mocha --debug-brk",
     "createdb": "./createdb.sh",
-    "lint": "eslint sri4node-attachments.js js test"
+    "lint": "eslint sri4node-attachments.js js test",
+    "prettier:check": "npx prettier --check .",
+    "prettier:fix": "npx prettier --write ."
   },
   "dependencies": {
-    "aws-sdk": "2.814.0",
+    "@aws-sdk/client-s3": "^3.267.0",
+    "@aws-sdk/s3-presigned-post": "^3.290.0",
     "mime-types": "^2.1.21",
     "p-event": "^2.0.0",
     "q": "^1.0.1",
-    "uuid": "2.0.x"
+    "uuid": "9.0.0"
   },
   "devDependencies": {
+    "@types/needle": "^3.2.0",
     "eslint": "^8.30.0",
     "eslint-config-airbnb-base": "^15.0.0",
     "eslint-plugin-import": "^2.26.0",
-    "mocha": "^8.0.0",
+    "express": "^4.18.2",
+    "mocha": "^10.2.0",
+    "needle": "^3.2.0",
+    "node-fetch": "^3.3.0",
+    "pg": "^8.9.0",
+    "prettier": "^2.8.4",
     "rewire": "^6.0.0",
-    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.12"
+    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.16"
   },
   "repository": {
     "type": "git",

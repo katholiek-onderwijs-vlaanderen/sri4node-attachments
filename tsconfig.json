@@ -1,9 +1,6 @@
 {
   "compilerOptions": {
-    "lib": [
-      "ES6",
-      "DOM"
-    ],
+    "lib": ["ES6", "DOM"],
     "target": "ES6",
     "noImplicitAny": false,
     "outDir": "./dist",
@@ -14,9 +11,7 @@
     "allowJs": true,
     "checkJs": true,
     "declaration": true,
-    "moduleResolution": "node",
+    "moduleResolution": "node"
   },
-  "exclude": [
-    "node_modules"
-  ]
+  "exclude": ["node_modules"]
 }

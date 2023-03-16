@@ -1,6 +1,6 @@
 module.exports = {
   debug: function debug(x) {
-    var verbose = process.env.LOG_DEBUG ? true : false // eslint-disable-line
+    var verbose = process.env.LOG_DEBUG ? true : false; // eslint-disable-line
     if (verbose) {
       console.log(x); // eslint-disable-line
     }
@@ -17,5 +17,4 @@ module.exports = {
   error: function (x) {
     console.error(x); // eslint-disable-line
   },
-
 };
