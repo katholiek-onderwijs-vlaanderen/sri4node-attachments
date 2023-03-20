@@ -7,26 +7,11 @@
  * @returns {import("sri4node").TResourceDefinition}
  */
 module.exports = function (sri4node, verbose, attachments, type) {
-  // var $u = sri4node.utils;
+  // const $u = sri4node.utils;
   const $m = sri4node.mapUtils;
   const $s = sri4node.schemaUtils;
   const $q = sri4node.queryUtils;
-  /*
-  function debug(x) {
-    if(verbose) {
-      console.log(x); // eslint-disable-line
-    }
-  }
-  */
 
-  // // version from persons-api-sri4node
-  // const getAttJson = async function (tx, sriRequest, resourceKey, attachmentKey) {
-  //   let att = await tx.one('select * from "attachments" where resource = $1 and key = $2', [resourceKey, attachmentKey]);
-  
-  //   return makeAttJson(att, '/persons/' + resourceKey);
-  // }
-
-  
   return {
     // Base url, maps 1:1 with a table in postgres
     // Same name, except the '/' is removed
@@ -147,9 +132,9 @@ module.exports = function (sri4node, verbose, attachments, type) {
       attachments.customRouteForDelete(
         async (tx, sriRequest, resourceKey, attachmentKey) => sriRequest.params.attachmentKey,
         async (tx, sriRequest, resourceKey, attachmentKey) => {
-          console.log(`RUN_AFTER_DELETE: ${resourceKey}, ${resourceKey}`);
+          console.log(`RUN_AFTER_DELETE: ${resourceKey}, ${attachmentKey}`);
         }),
-      // probably this also needs to be tested:
+      // TODO: probably these routes also need to be tested !!!
       // attachments.customRouteForGet(getAttJson)
     ],
 
