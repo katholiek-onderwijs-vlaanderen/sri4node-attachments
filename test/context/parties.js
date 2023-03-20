@@ -2,8 +2,8 @@
  *
  * @param {import("sri4node")} sri4node
  * @param {boolean} verbose
- * @param {*} attachments
- * @param {*} type
+ * @param { import("../../js/sri4node-attachments").TSri4NodeAttachmentUtils} attachments
+ * @param {string} type
  * @returns {import("sri4node").TResourceDefinition}
  */
 module.exports = function (sri4node, verbose, attachments, type) {
@@ -18,6 +18,15 @@ module.exports = function (sri4node, verbose, attachments, type) {
     }
   }
   */
+
+  // // version from persons-api-sri4node
+  // const getAttJson = async function (tx, sriRequest, resourceKey, attachmentKey) {
+  //   let att = await tx.one('select * from "attachments" where resource = $1 and key = $2', [resourceKey, attachmentKey]);
+  
+  //   return makeAttJson(att, '/persons/' + resourceKey);
+  // }
+
+  
   return {
     // Base url, maps 1:1 with a table in postgres
     // Same name, except the '/' is removed
@@ -129,9 +138,30 @@ module.exports = function (sri4node, verbose, attachments, type) {
       },
     },
     customRoutes: [
-      attachments.customRouteForUpload(type),
-      attachments.customRouteForDownload(type),
-      attachments.customRouteForDelete(type),
+      attachments.customRouteForUpload(async function (tx, sriRequest, file) {
+        // TODO: probably verify if this funtion is called when expected
+        console.log(`RUN_AFTER_UPLOAD: ${file.file.filename}`);
+        // console.log(JSON.stringify(file, null, 2));
+      }),
+      attachments.customRouteForDownload(),
+      attachments.customRouteForDelete(
+        async (tx, sriRequest, resourceKey, attachmentKey) => sriRequest.params.attachmentKey,
+        async (tx, sriRequest, resourceKey, attachmentKey) => {
+          console.log(`RUN_AFTER_DELETE: ${resourceKey}, ${resourceKey}`);
+        }),
+      // probably this also needs to be tested:
+      // attachments.customRouteForGet(getAttJson)
     ],
+
+    // persons-api-sri4node
+    // customRoutes: [
+    //   attachments.customRouteForUpload(uploadFile),
+    //   attachments.customRouteForDownload(),
+    //   attachments.customRouteForDelete(getFileName, deleteFile),
+    //   attachments.customRouteForGet(getAttJson)
+    //   //, attachments.customRouteForPreSignedUpload()
+    // ]
+
+
   };
 };

@@ -50,12 +50,9 @@ describe("sri4node-attachments : ", () => {
     }
   });
 
-  // eslint-disable-next-line global-require
   require("./unitTests");
-  // eslint-disable-next-line global-require
-  require("./testPartyAttachments")(base, "/partiesFolder");
-  // eslint-disable-next-line global-require
   require("./testPartyAttachments")(base, "/partiesS3");
 
-  //  require('./testIsolated.js')(base, '/partiesS3');
+  // local storage is currenlty not supported anymore
+  // require("./testPartyAttachments")(base, "/partiesFolder");
 });

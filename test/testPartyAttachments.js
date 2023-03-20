@@ -87,7 +87,7 @@ async function doPutFile(
 exports = module.exports = function (base, type) {
   describe(type, function () {
     describe("PUT", function () {
-      it("should allow adding of profile picture as attachment.", function () {
+      it("should allow adding of profile picture as attachment.", async () => {
         const body = {
           type: "person",
           name: "test user",
@@ -98,86 +98,79 @@ exports = module.exports = function (base, type) {
         const attachmentKey = uuid.v4();
 
         debug("Generated UUID=" + resourceKey);
-        return doPut(base + resourceHref, body, "annadv", "test")
-          .then(function (response) {
-            assert.equal(response.statusCode, 201);
-            debug("PUTting the profile image as attachment.");
-            const file = "test/orange-boy-icon.png";
-            return doPutFile(
-              base + type + "/attachments",
-              "profile.png",
-              file,
-              attachmentKey,
-              resourceHref,
-              "annadv",
-              "test"
-            );
-          })
-          .then(function (response) {
-            assert.equal(response.statusCode, 201);
-            return doGet(
-              base + type + "/" + resourceKey + "/profile.png",
-              "annadv",
-              "test"
-            );
-          })
-          .then(function (response) {
-            debug("Retrieving of file done");
-            debug("status code : " + response.statusCode);
-            debug("body length : " + response.body.length);
-            assert.equal(response.statusCode, 200);
-            if (!response.body.length || response.body.length < 10000) {
-              assert.fail(
-                "Response too small, it should be the 10.x Kb image we sent..."
-              );
-            }
-            const file = "test/little-boy-white.png";
-            return doPutFile(
-              base + type + "/attachments",
-              "profile.png",
-              file,
-              attachmentKey,
-              resourceHref,
-              "annadv",
-              "test"
-            );
-          })
-          .then(function (response) {
-            assert.equal(response.statusCode, 200);
-            return doGet(
-              base + type + "/" + resourceKey + "/profile.png",
-              "annadv",
-              "test"
-            );
-          })
-          .then(function (response) {
-            assert.equal(response.statusCode, 200);
-            if (
-              !response.body.length ||
-              response.body.length < 6000 ||
-              response.body > 9000
-            ) {
-              assert.fail("Replaced image should be about 7Kb...");
-            }
-            // Next : try to delete the resource.
-            return doDelete(
-              base + type + "/" + resourceKey + "/profile.png",
-              "annadv",
-              "test"
-            );
-          })
-          .then(function (response) {
-            assert.equal(response.statusCode, 200);
-            // Now check that is is gone..
-            return doGet(
-              base + type + "/" + resourceKey + "/profile.png",
-              "annadv",
-              "test"
-            );
-          })
-          .then(function (response) {
-            assert.equal(response.statusCode, 404);
-          });
+        const response = await doPut(
+          base + resourceHref,
+          body,
+          "annadv",
+          "test"
+        );
+        assert.equal(response.statusCode, 201);
+
+        debug("PUTting the profile image as attachment.");
+        const file = "test/orange-boy-icon.png";
+        const response2 = await doPutFile(
+          base + type + "/attachments",
+          "profile.png",
+          file,
+          attachmentKey,
+          resourceHref,
+          "annadv",
+          "test"
+        );
+        assert.equal(response2.statusCode, 200);
+
+        const response3 = await doGet(
+          base + type + "/" + resourceKey + "/attachments/profile.png",
+          "annadv",
+          "test"
+        );
+        debug("Retrieving of file done");
+        debug("status code : " + response3.statusCode);
+        debug("body length : " + response3.body.length);
+        assert.equal(response3.statusCode, 200);
+        if (!response3.body.length || response3.body.length < 10000) {
+          assert.fail(
+            "Response too small, it should be the 10.x Kb image we sent..."
+          );
+        }
+        const file2 = "test/little-boy-white.png";
+        const response4 = await doPutFile(
+          base + type + "/attachments",
+          "profile.png",
+          file2,
+          attachmentKey,
+          resourceHref,
+          "annadv",
+          "test"
+        );
+        assert.equal(response4.statusCode, 200);
+        const response5 = await doGet(
+          base + type + "/" + resourceKey + "/attachments/profile.png",
+          "annadv",
+          "test"
+        );
+        assert.equal(response5.statusCode, 200);
+        if (
+          !response5.body.length ||
+          response5.body.length < 6000 ||
+          response5.body > 9000
+        ) {
+          assert.fail("Replaced image should be about 7Kb...");
+        }
+        // Next : try to delete the resource.
+        const response6 = await doDelete(
+          base + type + "/" + resourceKey + "/attachments/profile.png",
+          "annadv",
+          "test"
+        );
+        assert.equal(response6.statusCode, 204);
+        // Now check that is is gone..
+        const response7 = await doGet(
+          base + type + "/" + resourceKey + "/attachments/profile.png",
+          "annadv",
+          "test"
+        );
+        assert.equal(response7.statusCode, 404);
       });
 
       it("should be idempotent.", function () {
@@ -208,9 +201,9 @@ exports = module.exports = function (base, type) {
             );
           })
           .then(function (response) {
-            assert.equal(response.statusCode, 201);
+            assert.equal(response.statusCode, 200);
             return doGet(
-              base + type + "/" + resourceKey + "/profile.png",
+              base + type + "/" + resourceKey + "/attachments/profile.png",
               "annadv",
               "test"
             );
@@ -237,7 +230,7 @@ exports = module.exports = function (base, type) {
           .then(function (response) {
             assert.equal(response.statusCode, 200);
             return doGet(
-              base + type + "/" + resourceKey + "/profile.png",
+              base + type + "/" + resourceKey + "/attachments/profile.png",
               "annadv",
               "test"
             );
@@ -279,9 +272,9 @@ exports = module.exports = function (base, type) {
             );
           })
           .then(function (response) {
-            assert.equal(response.statusCode, 201);
+            assert.equal(response.statusCode, 200);
             return doGet(
-              base + type + "/" + resourceKey + "/profile.png",
+              base + type + "/" + resourceKey + "/attachments/profile.png",
               "annadv",
               "test"
             );
@@ -297,25 +290,25 @@ exports = module.exports = function (base, type) {
               );
             }
             return doDelete(
-              base + type + "/" + resourceKey + "/profile.png",
+              base + type + "/" + resourceKey + "/attachments/profile.png",
               "annadv",
               "test"
             );
           })
           .then(function (response) {
-            assert.equal(response.statusCode, 200);
+            assert.equal(response.statusCode, 204);
             // Delete again.
             return doDelete(
-              base + type + "/" + resourceKey + "/profile.png",
+              base + type + "/" + resourceKey + "/attachments/profile.png",
               "annadv",
               "test"
             );
           })
           .then(function (response) {
-            assert.equal(response.statusCode, 200);
+            assert.equal(response.statusCode, 204);
             // Now check that is is gone..
             return doGet(
-              base + type + "/" + resourceKey + "/profile.png",
+              base + type + "/" + resourceKey + "/attachments/profile.png",
               "annadv",
               "test"
             );

@@ -9,7 +9,7 @@
     "posttest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml down --volumes --rmi=local --remove-orphans",
     "test-dev": "env $(cat .env) mocha --debug-brk",
     "createdb": "./createdb.sh",
-    "lint": "eslint sri4node-attachments.js js test",
+    "lint": "eslint js test",
     "prettier:check": "npx prettier --check .",
     "prettier:fix": "npx prettier --write ."
   },
@@ -22,9 +22,11 @@
     "uuid": "9.0.0"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.1",
     "@types/needle": "^3.2.0",
     "eslint": "^8.30.0",
     "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^8.7.0",
     "eslint-plugin-import": "^2.26.0",
     "express": "^4.18.2",
     "mocha": "^10.2.0",
@@ -33,7 +35,7 @@
     "pg": "^8.9.0",
     "prettier": "^2.8.4",
     "rewire": "^6.0.0",
-    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.16"
+    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.19"
   },
   "repository": {
     "type": "git",

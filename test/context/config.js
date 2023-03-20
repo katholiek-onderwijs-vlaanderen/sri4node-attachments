@@ -86,9 +86,9 @@ module.exports = async function (verbose) {
       ],
     },
     resources: [
-      partiesFactory(sri4node, verbose, attachmentUtilsForS3, "/partiesFolder"),
+      partiesFactory(sri4node, verbose, attachmentUtilsForS3, "/partiesS3"),
       // Is storing files locally still supported?
-      // partiesFactory(sri4node, verbose, attachmentUtilsForLocalFolder, '/partiesS3'),
+      // partiesFactory(sri4node, verbose, attachmentUtilsForLocalFolder, '/partiesFolder'),
     ],
   };
 };
