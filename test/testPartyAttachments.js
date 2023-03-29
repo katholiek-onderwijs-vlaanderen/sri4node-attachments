@@ -34,8 +34,25 @@ const doPut = (url, body, username, password) =>
   doHttp("put", url, body, username, password);
 
 /**
+ * This will use the /resource/attachments endpoint to upload one or multiple files.
+ * This is a multipart post, where the 'body' part is a stringified and properly escaped
+ * (escaping is handled by needle) JSON array of objects, each object having the following
+ * properties:
+ * ```javascript
+ * {
+ *    file: 'remotefileName', // string
+ *    attachment: {
+ *      key: attachmentKey, // guid
+ *      description: `this is MY file`, // string
+ *    },
+ *    resource: {
+ *      href: resourceHref, // href to the resource to which this attachment is attached
+ *    },
+ * }
+ * ```
+ * The 'data' part is a file, which is the local file to be uploaded.
  *
- * @param {string} url
+ * @param {string} resourceUrl is the url of the resource for which you want to put an attachment
  * @param {string} remotefileName
  * @param {string} localFilename
  * @param {string} attachmentKey (a guid)
@@ -45,7 +62,7 @@ const doPut = (url, body, username, password) =>
  * @returns {Promise<any>} a needle http response
  */
 async function doPutFile(
-  url,
+  resourceUrl,
   remotefileName,
   localFilename,
   attachmentKey,
@@ -81,7 +98,7 @@ async function doPutFile(
     },
   };
 
-  return needle("post", url, data, options);
+  return needle("post", resourceUrl + "/attachments", data, options);
 }
 
 exports = module.exports = function (base, type) {
@@ -109,7 +126,7 @@ exports = module.exports = function (base, type) {
         debug("PUTting the profile image as attachment.");
         const file = "test/orange-boy-icon.png";
         const response2 = await doPutFile(
-          base + type + "/attachments",
+          base + type,
           "profile.png",
           file,
           attachmentKey,
@@ -135,7 +152,7 @@ exports = module.exports = function (base, type) {
         }
         const file2 = "test/little-boy-white.png";
         const response4 = await doPutFile(
-          base + type + "/attachments",
+          base + type,
           "profile.png",
           file2,
           attachmentKey,
@@ -191,7 +208,7 @@ exports = module.exports = function (base, type) {
             debug("PUTting the profile image as attachment.");
             const file = "test/orange-boy-icon.png";
             return doPutFile(
-              base + type + "/attachments",
+              base + type,
               "profile.png",
               file,
               attachmentKey,
@@ -218,7 +235,7 @@ exports = module.exports = function (base, type) {
             size = response.body.length;
             const file = "test/orange-boy-icon.png";
             return doPutFile(
-              base + type + "/attachments",
+              base + type,
               "profile.png",
               file,
               attachmentKey,
@@ -245,7 +262,7 @@ exports = module.exports = function (base, type) {
     });
 
     describe("DELETE", function () {
-      it("should be idempotent.", function () {
+      it("should be idempotent (and actually delete the file).", function () {
         const body = {
           type: "person",
           name: "test user",
@@ -262,7 +279,7 @@ exports = module.exports = function (base, type) {
             debug("PUTting the profile image as attachment.");
             const file = "test/orange-boy-icon.png";
             return doPutFile(
-              base + type + "/attachments",
+              base + type,
               "profile.png",
               file,
               attachmentKey,
@@ -317,6 +334,13 @@ exports = module.exports = function (base, type) {
             assert.equal(response.statusCode, 404);
           });
       });
+    });
+
+    // TODO, check if all customRoutes work as expected.
+    // customRouteForUpload, customRouteForUploadCopy, customRouteForPreSignedUpload,
+    // customRouteForDownload, customRouteForDelete, customRouteForGet
+    describe("customRouteForUpload", function () {
+      // TDOO
     });
   });
 };

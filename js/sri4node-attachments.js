@@ -13,7 +13,7 @@ const { v4: uuidv4 } = require("uuid");
  * This format is typed here separately. On single file uplods the body does not have to be an array
  * and can also be a single object
  * @typedef { {
- *    file: TFileObj,
+ *    file: string, // the  filename
  *    fileHref: string,
  *    attachment: {
  *      key: string,
@@ -26,6 +26,8 @@ const { v4: uuidv4 } = require("uuid");
  *    },
  *    ignoreNotFound?: boolean,
  * } } TMultiPartSingleBodyForFileUploads
+ *
+ * @typedef { TMultiPartSingleBodyForFileUploads & { fileObj: TFileObj } } TMultiPartSingleBodyForFileUploadsWithFileObj
  */
 
 /**
@@ -38,9 +40,8 @@ const { v4: uuidv4 } = require("uuid");
  *  fields?: Record<string, any>,
  *  hash?: string,
  *  size?: number,
-* } } TFileObj
+ * } } TFileObj
  */
-
 
 /**
  * @param {string} href for example /things/123
@@ -101,11 +102,11 @@ function getSafeFilename(filename) {
  *
  * @typedef { {
  *    customRouteForUpload: (
- *      runAfterUpload: (tx: IDatabase, sriRequest: TSriRequest, att: TMultiPartSingleBodyForFileUploads) => void,
+ *      runAfterUpload: (tx: IDatabase, sriRequest: TSriRequest, att: TMultiPartSingleBodyForFileUploadsWithFileObj) => void,
  *      getResourceForCopy: (href: string) => string
  *    ) => TCustomRoute,
  *    customRouteForUploadCopy: (
- *      runAfterUpload: (tx: IDatabase, sriRequest: TSriRequest, att: TMultiPartSingleBodyForFileUploads) => void,
+ *      runAfterUpload: (tx: IDatabase, sriRequest: TSriRequest, att: TMultiPartSingleBodyForFileUploadsWithFileObj) => void,
  *      getResourceForCopy: (href: string) => string
  *    ) => TCustomRoute,
  *    customRouteForPreSignedUpload: () => TCustomRoute,
@@ -217,7 +218,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * If fullPluginConfig.createBucketIfNotExists it will try to create the bucket if it does not
    * exsist, otherwise only an error will be printed (which is kind of stupid, it should probably
    * throw an exception)
-   * 
+   *
    * @returns {Promise<void>}
    */
   async function checkOrCreateBucket() {
@@ -247,8 +248,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
-   * 
-   * @param {string} s3filename 
+   *
+   * @param {string} s3filename
    * @returns {Promise<S3.HeadObjectCommandOutput>}
    */
   async function headFromS3(s3filename) {
@@ -265,7 +266,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * Any error currently is silently discarded,
    * so if this method returns null, it mans there was a problem
    *
-   * @param {string} s3filename 
+   * @param {string} s3filename
    * @returns {Promise<S3.HeadObjectCommandOutput>}
    */
   async function getFileMeta(s3filename) {
@@ -353,8 +354,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
-   * 
-   * @param {string[]} filenames 
+   *
+   * @param {string[]} filenames
    * @returns {Promise<void>}
    */
   async function deleteFromS3(filenames) {
@@ -385,11 +386,13 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * Function that returns the S3 filename given the object that is sent when using
    * the multipart form data for file uploads.
    *
-   * @param {TMultiPartSingleBodyForFileUploads} fileObj
+   * @param {TMultiPartSingleBodyForFileUploadsWithFileObj} multiPartSingleBodyWithFileObj
    * @returns {string}
    */
-  function getS3FileNameByMuliPartBody(fileObj) {
-    return `${hrefToKey(fileObj.resource.href)}-${fileObj.file.filename}`; /// get filename from json for upload
+  function getS3FileNameByMuliPartBody(multiPartSingleBodyWithFileObj) {
+    return `${hrefToKey(multiPartSingleBodyWithFileObj.resource.href)}-${
+      multiPartSingleBodyWithFileObj.fileObj.filename
+    }`; /// get filename from json for upload
   }
 
   /**
@@ -428,14 +431,14 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    *
-   * @param {Array<TMultiPartSingleBodyForFileUploads>} files
+   * @param {Array<TMultiPartSingleBodyForFileUploadsWithFileObj>} files
    * @param {TSriRequest} sriRequest
    */
   async function checkExistence(files, sriRequest) {
     // eslint-disable-next-line no-restricted-syntax
     for (const fileWithJson of files) {
       // debug(params);
-      const { file } = fileWithJson;
+      const { fileObj } = fileWithJson;
       // eslint-disable-next-line no-await-in-loop
       const head = await getFileMeta(getS3FileNameByMuliPartBody(fileWithJson));
       // debug(head);
@@ -451,7 +454,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
             {
               code: "file.already.exists",
               type: "ERROR",
-              message: `${file.filename} already exists for this resource. Filename has to be unique per resource. To overwrite provide the existing file key.`,
+              message: `${fileObj.filename} already exists for this resource. Filename has to be unique per resource. To overwrite provide the existing file key.`,
             },
           ],
         });
@@ -460,8 +463,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
-   * 
-   * @param {string} filename 
+   *
+   * @param {string} filename
    * @returns {string}
    */
   function getTmpFilename(filename) {
@@ -469,10 +472,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
-   * 
-   * @param {string} destionationFileName 
-   * @param {string} sourceFileName 
-   * @param {string} attachmentKey 
+   *
+   * @param {string} destionationFileName
+   * @param {string} sourceFileName
+   * @param {string} attachmentKey
    * @returns {Promise<S3.CopyObjectCommandOutput>}
    */
   async function copyFile(destionationFileName, sourceFileName, attachmentKey) {
@@ -505,13 +508,13 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    *
-   * @param {TMultiPartSingleBodyForFileUploads} fileWithJson
+   * @param {TMultiPartSingleBodyForFileUploadsWithFileObj} fileWithJson
    * @returns {Promise<void>}
    */
   async function renameFile(fileWithJson) {
-    const { file } = fileWithJson;
+    const { fileObj } = fileWithJson;
     const s3filename = getS3FileNameByMuliPartBody(fileWithJson);
-    const { tmpFileName } = file;
+    const { tmpFileName } = fileObj;
     debug(`Rename ${tmpFileName} to ${s3filename}`);
 
     await copyFile(s3filename, tmpFileName, fileWithJson.attachment.key);
@@ -616,7 +619,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
-   * 
+   *
    * @returns {Promise<S3PresignedPost.PresignedPost>}
    */
   async function getPreSigned() {
@@ -689,7 +692,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * @param {Array<TMultiPartSingleBodyForFileUploads>} bodyJson
    * @param {(href: string) => string} getResourceHrefByAttachmentHref translates the href of the
    *    attachment to the resource href
-   * @returns
+   * @returns {Promise<Array<TMultiPartSingleBodyForFileUploadsWithFileObj>>}
    */
   async function copyAttachments(
     tx,
@@ -703,71 +706,76 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
 
     sriRequest.logDebug(logChannel, "copy attachments");
-    const resources = new Set();
+    const resources = new Set(
+      toCopy.map((body) => getResourceHrefByAttachmentHref(body.fileHref))
+    );
 
-    toCopy.forEach((body) => {
+    /** @type { Array<TMultiPartSingleBodyForFileUploadsWithFileObj> } */
+    const toCopyWithFileObj = toCopy.map((body) => {
       const resourceHref = getResourceHrefByAttachmentHref(body.fileHref);
       resources.add(resourceHref);
       const filename = body.fileHref.split("/attachments/").pop();
-      body.file = {
-        tmpFileName: getTmpFilename(filename),
-        filename,
-        mimetype: mime.contentType(filename),
+      return {
+        ...body,
+        fileObj: {
+          tmpFileName: getTmpFilename(filename),
+          filename,
+          mimetype: mime.contentType(filename),
+        },
       };
     });
 
     await checkSecurityForResources(tx, sriRequest, "read", resources);
 
-    const promises = [];
-
-    toCopy.forEach((body) => {
-      promises.push(getFileMeta(getS3FileNameByHref(body.fileHref)));
-    });
-
+    const promises = toCopy.map((body) =>
+      getFileMeta(getS3FileNameByHref(body.fileHref))
+    );
     const results = await Promise.all(promises);
 
     // Set meta fields and handle not found files
-    toCopy = toCopy.filter((tc, index) => {
-      const meta = results[index];
-      if (meta) {
-        const fileObj = tc.file;
-        fileObj.hash = meta.ETag;
-        fileObj.size = meta.ContentLength;
-        return true;
+    const toCopyWithFileObjFiltered = toCopyWithFileObj.filter(
+      (tcwfo, index) => {
+        const meta = results[index];
+        if (meta) {
+          const fileObj = tcwfo.fileObj;
+          fileObj.hash = meta.ETag;
+          fileObj.size = meta.ContentLength;
+          return true;
+        }
+
+        if (tcwfo.ignoreNotFound) {
+          return false;
+        }
+
+        throw new sriRequest.SriError({
+          status: 409,
+          errors: [
+            {
+              code: "file.to.copy.not.found",
+              type: "ERROR",
+              message: "One or more of the files to copy can not be found",
+            },
+          ],
+        });
       }
+    );
 
-      if (tc.ignoreNotFound) {
-        return false;
-      }
+    const copyPromises = toCopyWithFileObjFiltered.map((body) =>
+      copyFile(
+        body.fileObj.tmpFileName,
+        getS3FileNameByHref(body.fileHref),
+        body.attachment.key
+      )
+    );
 
-      throw new sriRequest.SriError({
-        status: 409,
-        errors: [
-          {
-            code: "file.to.copy.not.found",
-            type: "ERROR",
-            message: "One or more of the files to copy can not be found",
-          },
-        ],
-      });
-    });
-
-    toCopy.forEach((body) => {
-      promises.push(
-        copyFile(
-          body.file.tmpFileName,
-          getS3FileNameByHref(body.fileHref),
-          body.attachment.key
-        )
-      );
-    });
-
-    await Promise.all(promises);
+    await Promise.all(copyPromises);
 
     // Remove the not found files from the bodyJson
-    return bodyJson.filter(
-      (bj) => !bj.fileHref || toCopy.some((tc) => tc.fileHref === bj.fileHref)
-    );
+    // return bodyJson.filter(
+    //   (bj) => !bj.fileHref || toCopy.some((tc) => tc.fileHref === bj.fileHref)
+    // );
+
+    return toCopyWithFileObjFiltered;
   }
 
   /**
@@ -798,10 +806,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
+   * Will throw and SriError if the file is not present in the bodyJson.
    *
    * @param {TFileObj} file
    * @param {Array<TMultiPartSingleBodyForFileUploads>} bodyJson
    * @param {TSriRequest} sriRequest
+   * @throws {SriError}
    */
   function checkBodyJsonForFile(file, bodyJson, sriRequest) {
     if (!bodyJson.some((e) => e.file === file.filename)) {
@@ -820,18 +830,24 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    * BEWARE: THIS FUNCTION MODIFIES the bodyJson parameter !!!
+   * Given the 'body' part of the multipart post message,
+   * this function will check if the file is present in the attachmentsRcvd.
+   *
    *
    * @param {Array<TMultiPartSingleBodyForFileUploads>} bodyJson
    * @param {TSriRequest} sriRequest
-   * @param {*} attachmentsRcvd   TODO: type!
+   * @param {Array<TFileObj>} attachmentsRcvd   TODO: type!
+   * @returns {Array<TMultiPartSingleBodyForFileUploads & {fileObj: TFileObj}>}
    */
   function checkFileForBodyJson(bodyJson, sriRequest, attachmentsRcvd) {
     // validate JSONs for each of the files
-    bodyJson.forEach((att) => {
+    return bodyJson.map((att) => {
       if (att.file !== undefined && !att.fileHref) {
-        att.file = attachmentsRcvd.find((attf) => attf.filename === att.file);
+        const fileObj = attachmentsRcvd.find(
+          (attf) => attf.filename === att.file
+        );
 
-        if (att.file === undefined) {
+        if (fileObj === undefined) {
           throw new sriRequest.SriError({
             status: 409,
             errors: [
@@ -843,6 +859,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
             ],
           });
         }
+        return { ...att, fileObj };
       }
     });
   }
@@ -901,8 +918,26 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   /**
    * A function that will generate a json object that can be used in
    * sriConfig.resources.*.customRoutes in order to add a POST /resource/attachments route.
+   *  * This is a multipart post, where the 'body' part is a stringified and properly escaped
+   * (escaping is handled by needle) JSON array of objects, each object having the following
+   * properties:
+   * ```javascript
+   * {
+   *    file: 'remotefileName', // string
+   *    attachment: {
+   *      key: attachmentKey, // guid
+   *      description: `this is MY file`, // string
+   *    },
+   *    resource: {
+   *      href: resourceHref, // href to the resource to which this attachment is attached
+   *    },
+   * }
+   * ```
+   * The 'data' part(s) is (are) a file, which is the actual contents of the uploaded file.
+   * There must be as many data parts, as there are records in the body part array.
+   * The 'data' part(s) must be in the same order as defined in the 'body' part.
    *
-   * @param { (tx: IDatabase, sriRequest: TSriRequest, att: TMultiPartSingleBodyForFileUploads) => void} runAfterUpload
+   * @param { (tx: IDatabase, sriRequest: TSriRequest, attachments: TMultiPartSingleBodyForFileUploadsWithFileObj) => void} runAfterUpload
    * @param {(href: string) => string} [getResourceForCopy] turns the href of the resource to copy the attachment from into the href of the resource to copy the attachment to
    * @returns {TCustomRoute}
    */
@@ -918,7 +953,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
        * @param {TSriRequest} sriRequest
        * @param {import('stream').Readable} stream
        */
-      streamingHandler: async (tx, sriRequest, stream) => {
+      streamingHandler: async (tx, sriRequest, stream, _internalUtils) => {
         /** @type {Array<TFileObj>} */
         const attachmentsRcvd = [];
         const fieldsRcvd = {};
@@ -981,20 +1016,13 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           }
         );
 
-        sriRequest.busBoy.on(
-          "field",
-          (
-            fieldname,
-            val,
-            _info,
-          ) => {
-            sriRequest.logDebug(
-              logChannel,
-              `Field [${fieldname}]: value: ${val}`
-            );
-            fieldsRcvd[fieldname] = val;
-          }
-        );
+        sriRequest.busBoy.on("field", (fieldname, val, _info) => {
+          sriRequest.logDebug(
+            logChannel,
+            `Field [${fieldname}]: value: ${val}`
+          );
+          fieldsRcvd[fieldname] = val;
+        });
 
         // wait until busboy is done
         await pEvent(sriRequest.busBoy, "close");
@@ -1020,26 +1048,28 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           });
         }
         const bodyParsed = JSON.parse(bodyString);
+        /** @type {Array<TMultiPartSingleBodyForFileUploads>} */
         const bodyArray = Array.isArray(bodyParsed) ? bodyParsed : [bodyParsed];
 
         validateRequestData(bodyArray, sriRequest);
 
         /** @type {Array<TMultiPartSingleBodyForFileUploads>} */
-        const newBodyArray = bodyArray.map((b) => {
-          const newB = { ...b };
-          if (newB.file) {
-            newB.file = getSafeFilename(b.file);
-          }
-          if (newB.attachment.name) {
-            newB.attachment.name = getSafeFilename(b.attachment.name);
-          }
-          return newB;
-        });
+        const newBodyArray = bodyArray.map((b) => ({
+          ...b,
+          file: b.file ? getSafeFilename(b.file) : undefined,
+          attachment: {
+            ...b.attachment,
+            name: b.attachment.name
+              ? getSafeFilename(b.attachment.name)
+              : undefined,
+          },
+        }));
 
         attachmentsRcvd.forEach((file) =>
           checkBodyJsonForFile(file, newBodyArray, sriRequest)
         );
 
+        // MODIFYING THE ATTACHMENTSRCVD ARRAY (bad practices again) TODO: fix this code
         attachmentsRcvd.forEach((file) => {
           file.mimetype = mime.contentType(file.filename);
         });
@@ -1053,11 +1083,15 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           );
         }
 
-        checkFileForBodyJson(newBodyArray, sriRequest, attachmentsRcvd);
+        const newBodyArrayWithFileObj = checkFileForBodyJson(
+          newBodyArray,
+          sriRequest,
+          attachmentsRcvd
+        );
 
         /**
          *
-         * @param {TMultiPartSingleBodyForFileUploads} att
+         * @param {TMultiPartSingleBodyForFileUploadsWithFileObj} att
          * @returns
          */
         async function handleTheFile(att) {
@@ -1067,7 +1101,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
         if (fullPluginConfig.checkFileExistence) {
           await checkExistence(
-            newBodyArray.filter((e) => e.file !== undefined),
+            newBodyArrayWithFileObj.filter((e) => e.fileObj !== undefined),
             sriRequest
           );
         }
@@ -1077,7 +1111,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           if (fullPluginConfig.uploadInSequence) {
             // For example Persons Api which uses an sri4node as a proxy for its attachments files
             // should be sequentially uploaded
-            for (const file of newBodyArray) {
+            for (const file of newBodyArrayWithFileObj) {
               // eslint-disable-next-line no-await-in-loop
               try {
                 await handleTheFile(file);
@@ -1090,37 +1124,35 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
               debug("handleFile success");
             }
           } else {
-            const uploads = [];
-
-            newBodyArray.forEach((file) => {
-              uploads.push(
-                (async () => {
-                  try {
-                    await handleTheFile(file);
-                  } catch (ex) {
-                    sriRequest.logDebug(logChannel, "handlefile failed");
-                    sriRequest.logDebug(
-                      logChannel,
-                      JSON.stringify(file, null, 2)
-                    );
-                    sriRequest.logDebug(logChannel, ex);
-                    failed.push(ex);
-                  }
-                  debug("handleFile success");
-                })()
-              );
-            });
-            await Promise.all(uploads);
+            const uploadPromises = newBodyArrayWithFileObj.map((file) =>
+              (async () => {
+                try {
+                  await handleTheFile(file);
+                } catch (ex) {
+                  sriRequest.logDebug(logChannel, "handlefile failed");
+                  sriRequest.logDebug(
+                    logChannel,
+                    JSON.stringify(file, null, 2)
+                  );
+                  sriRequest.logDebug(logChannel, ex);
+                  failed.push(ex);
+                }
+                debug("handleFile success");
+              })()
+            );
+            await Promise.all(uploadPromises);
           }
         } else {
           try {
-            await handleTheFile(newBodyArray);
+            // TODO: this is not working yet in my opinion, so we should add a test case for this
+            // code path and fix the code !!!
+            await handleTheFile(newBodyArrayWithFileObj);
             debug("handleFile success");
           } catch (ex) {
             sriRequest.logDebug(logChannel, "handlefile failed");
             sriRequest.logDebug(
               logChannel,
-              JSON.stringify(newBodyArray, null, 2)
+              JSON.stringify(newBodyArrayWithFileObj, null, 2)
             );
             sriRequest.logDebug(logChannel, ex);
             failed.push(ex);
@@ -1170,7 +1202,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           // stream.push(failed);
         } else {
           /// all went well, rename the files to their real names now.
-          newBodyArray
+          newBodyArrayWithFileObj
             .filter((e) => e.file !== undefined)
             .forEach((file) => {
               renames.push(renameFile(file));
@@ -1179,7 +1211,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           await Promise.all(renames);
 
           const response = [];
-          newBodyArray.forEach((file) => {
+          newBodyArrayWithFileObj.forEach((file) => {
             response.push({
               status: 200,
               href: `${file.resource.href}/attachments/${file.attachment.key}`,
@@ -1195,7 +1227,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * A function that will generate a json object that can be used in
    * sriConfig.resources.*.customRoutes in order to add a POST /resource/attachments/copy route.
    *
-   * @param { (tx: IDatabase, sriRequest: TSriRequest, att: TMultiPartSingleBodyForFileUploads) => void } runAfterUpload
+   * @param { (tx: IDatabase, sriRequest: TSriRequest, att: TMultiPartSingleBodyForFileUploadsWithFileObj) => void } runAfterUpload
    * @param {(href: string) => string} [getResourceForCopy] turns the href of the resource to copy the attachment from into the href of the resource to copy the attachment to
    * @returns {TCustomRoute}
    */
@@ -1206,12 +1238,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       readOnly: false,
 
       /**
-       * 
-       * @param {IDatabase} tx 
-       * @param {TSriRequest} sriRequest 
-       * @returns 
+       *
+       * @param {IDatabase} tx
+       * @param {TSriRequest} sriRequest
+       * @returns
        */
-      handler: async (tx, sriRequest) => {
+      handler: async (tx, sriRequest, _customMapping, _internalUtils) => {
         const attachmentsRcvd = [];
         const fieldsRcvd = {};
 
@@ -1250,8 +1282,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
         validateRequestData(bodyJsonArray, sriRequest);
 
+        /** @type {Array<TMultiPartSingleBodyForFileUploadsWithFileObj>} */
+        let bodyJsonArrayWithFileObj;
         if (getResourceForCopy) {
-          bodyJsonArray = await copyAttachments(
+          bodyJsonArrayWithFileObj = await copyAttachments(
             tx,
             sriRequest,
             bodyJsonArray,
@@ -1259,11 +1293,15 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           );
         }
 
-        checkFileForBodyJson(bodyJsonArray, sriRequest, attachmentsRcvd);
+        checkFileForBodyJson(
+          bodyJsonArrayWithFileObj,
+          sriRequest,
+          attachmentsRcvd
+        );
 
         /**
          *
-         * @param {TMultiPartSingleBodyForFileUploads} att
+         * @param {TMultiPartSingleBodyForFileUploadsWithFileObj} att
          * @returns
          */
         async function handleTheFile(att) {
@@ -1276,7 +1314,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
         if (fullPluginConfig.checkFileExistence) {
           await checkExistence(
-            bodyJsonArray.filter((e) => e.file !== undefined),
+            bodyJsonArrayWithFileObj.filter((e) => e.fileObj !== undefined),
             sriRequest
           );
         }
@@ -1317,7 +1355,9 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           }
         } else {
           try {
-            await handleTheFile(bodyJsonArray);
+            // TODO FIXME: add a test case for this code path, accordingto the typing,
+            // the next line is not going to work
+            await handleTheFile(bodyJsonArrayWithFileObj);
             debug("handleFile success");
           } catch (ex) {
             sriRequest.logDebug(logChannel, "handlefile failed");
@@ -1375,14 +1415,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
           await Promise.all(renames);
 
-          const response = [];
-          bodyJsonArray.forEach((file) => {
-            response.push({
-              status: 200,
-              href: `${file.resource.href}/attachments/${file.attachment.key}`,
-            });
-          });
-          return response;
+          /** @type {Array<import("sri4node").TSriResult>} */
+          return bodyJsonArray.map((file) => ({
+            status: 200,
+            href: `${file.resource.href}/attachments/${file.attachment.key}`,
+          }));
         }
       },
     };
@@ -1406,13 +1443,18 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       /**
        * @type { TNonStreamingCustomRoute['beforeHandler'] }
        */
-      beforeHandler: async (_tx, _sriRequest, _customMapping) => {
+      beforeHandler: async (
+        _tx,
+        _sriRequest,
+        _customMapping,
+        _internalUtils
+      ) => {
         // await checkSecurity(tx, sriRequest, null, 'create');
       },
       /**
        * @type { TNonStreamingCustomRoute['handler'] }
        */
-      handler: async (_tx, _sriRequest) => {
+      handler: async (_tx, _sriRequest, _customMapping, _internalUtils) => {
         /// do the presigned request to s3
         const json = await getPreSigned();
         return {
@@ -1441,7 +1483,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       /**
        * @type { TStreamingCustomRoute['beforeStreamingHandler'] }
        */
-      beforeStreamingHandler: async (tx, sriRequest, _customMapping) => {
+      beforeStreamingHandler: async (
+        tx,
+        sriRequest,
+        _customMapping,
+        _internalUtils
+      ) => {
         await checkSecurity(tx, sriRequest, null, "read");
         sriRequest.logDebug(logChannel, sriRequest.params.filename);
 
@@ -1468,7 +1515,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       /**
        * @type { TStreamingCustomRoute['streamingHandler'] }
        */
-      streamingHandler: async (tx, sriRequest, stream) => {
+      streamingHandler: async (tx, sriRequest, stream, _internalUtils) => {
         await handleFileDownload(tx, sriRequest, stream, false);
         sriRequest.logDebug(logChannel, "streaming download done");
         return null;
@@ -1497,13 +1544,13 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       /**
        * @type { TNonStreamingCustomRoute['beforeHandler'] }
        */
-      beforeHandler: async (tx, sriRequest) => {
+      beforeHandler: async (tx, sriRequest, _customMapping, _internalUtils) => {
         await checkSecurity(tx, sriRequest, null, "delete");
       },
       /**
        * @type { TNonStreamingCustomRoute['handler'] }
        */
-      handler: async (tx, sriRequest) => {
+      handler: async (tx, sriRequest, _customMapping, _internalUtils) => {
         const filename = await getFileNameHandler(
           tx,
           sriRequest,
@@ -1515,7 +1562,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           status: 204,
         };
       },
-      afterHandler: async (tx, sriRequest) => {
+      afterHandler: async (tx, sriRequest, _customMapping, _internalUtils) => {
         await afterHandler(
           tx,
           sriRequest,
@@ -1543,10 +1590,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       routePostfix: "/:key/attachments/:attachmentKey",
       httpMethods: ["GET"],
       readOnly: true,
-      beforeHandler: async (tx, sriRequest) => {
+      beforeHandler: async (tx, sriRequest, _customMapping, _internalUtils) => {
         await checkSecurity(tx, sriRequest, null, "read");
       },
-      handler: async (tx, sriRequest) => ({
+      handler: async (tx, sriRequest, _customMapping, _internalUtils) => ({
         body: await getAttJson(
           tx,
           sriRequest,

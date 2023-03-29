@@ -3,7 +3,7 @@ module.exports = {
     commonjs: true,
     es2021: true,
     node: true,
-    mocha: true
+    mocha: true,
   },
   extends: ["eslint:recommended", "prettier"],
   overrides: [],
@@ -11,6 +11,9 @@ module.exports = {
     ecmaVersion: "latest",
   },
   rules: {
-  "no-unused-vars": ["error", { "args": "all", "varsIgnorePattern": "^_", "argsIgnorePattern": "^_" }]
+    "no-unused-vars": [
+      "error",
+      { args: "all", varsIgnorePattern: "^_", argsIgnorePattern: "^_" },
+    ],
   },
 };

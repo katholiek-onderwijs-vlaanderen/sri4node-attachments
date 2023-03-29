@@ -124,15 +124,17 @@ module.exports = function (sri4node, attachments, type) {
     customRoutes: [
       attachments.customRouteForUpload(async function (_tx, _sriRequest, file) {
         // TODO: probably verify if this funtion is called when expected
-        console.log(`RUN_AFTER_UPLOAD: ${file.file.filename}`);
+        console.log(`RUN_AFTER_UPLOAD: ${file.fileObj.filename}`);
         // console.log(JSON.stringify(file, null, 2));
-      }),
+      }, s => s),
       attachments.customRouteForDownload(),
       attachments.customRouteForDelete(
-        async (_tx, sriRequest, _resourceKey, _attachmentKey) => sriRequest.params.attachmentKey,
+        async (_tx, sriRequest, _resourceKey, _attachmentKey) =>
+          sriRequest.params.attachmentKey,
         async (_tx, _sriRequest, resourceKey, attachmentKey) => {
           console.log(`RUN_AFTER_DELETE: ${resourceKey}, ${attachmentKey}`);
-        }),
+        }
+      ),
       // TODO: probably these routes also need to be tested !!!
       // attachments.customRouteForGet(getAttJson)
     ],
@@ -145,7 +147,5 @@ module.exports = function (sri4node, attachments, type) {
     //   attachments.customRouteForGet(getAttJson)
     //   //, attachments.customRouteForPreSignedUpload()
     // ]
-
-
   };
 };
