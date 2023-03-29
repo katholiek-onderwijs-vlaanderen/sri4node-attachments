@@ -1,12 +1,11 @@
 /**
  *
  * @param {import("sri4node")} sri4node
- * @param {boolean} verbose
  * @param { import("../../js/sri4node-attachments").TSri4NodeAttachmentUtils} attachments
  * @param {string} type
  * @returns {import("sri4node").TResourceDefinition}
  */
-module.exports = function (sri4node, verbose, attachments, type) {
+module.exports = function (sri4node, attachments, type) {
   // const $u = sri4node.utils;
   const $m = sri4node.mapUtils;
   const $s = sri4node.schemaUtils;
@@ -123,15 +122,15 @@ module.exports = function (sri4node, verbose, attachments, type) {
       },
     },
     customRoutes: [
-      attachments.customRouteForUpload(async function (tx, sriRequest, file) {
+      attachments.customRouteForUpload(async function (_tx, _sriRequest, file) {
         // TODO: probably verify if this funtion is called when expected
         console.log(`RUN_AFTER_UPLOAD: ${file.file.filename}`);
         // console.log(JSON.stringify(file, null, 2));
       }),
       attachments.customRouteForDownload(),
       attachments.customRouteForDelete(
-        async (tx, sriRequest, resourceKey, attachmentKey) => sriRequest.params.attachmentKey,
-        async (tx, sriRequest, resourceKey, attachmentKey) => {
+        async (_tx, sriRequest, _resourceKey, _attachmentKey) => sriRequest.params.attachmentKey,
+        async (_tx, _sriRequest, resourceKey, attachmentKey) => {
           console.log(`RUN_AFTER_DELETE: ${resourceKey}, ${attachmentKey}`);
         }),
       // TODO: probably these routes also need to be tested !!!

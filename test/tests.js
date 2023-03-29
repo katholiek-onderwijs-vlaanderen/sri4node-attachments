@@ -4,11 +4,9 @@ const sri4node = require("sri4node");
 
 const app = express();
 
-const verbose = !!process.env.LOG_DEBUG;
-
 const sri4nodeConfigFactory = require("./context/config");
 
-const sriConfigPromise = sri4nodeConfigFactory(verbose);
+const sriConfigPromise = sri4nodeConfigFactory();
 const port = 5000;
 const base = `http://localhost:${port}`;
 

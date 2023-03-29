@@ -1,6 +1,7 @@
 const pEvent = require("p-event");
 const S3 = require("@aws-sdk/client-s3");
-const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
+// const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
+const S3PresignedPost = require("@aws-sdk/s3-presigned-post");
 const mime = require("mime-types");
 const { v4: uuidv4 } = require("uuid");
 
@@ -12,39 +13,34 @@ const { v4: uuidv4 } = require("uuid");
  * This format is typed here separately. On single file uplods the body does not have to be an array
  * and can also be a single object
  * @typedef { {
- *    file: {
- *      filename: string,
- *      originalFilename?: string,
- *      mimetype: string,
- *      file?: import('stream').Readable,
- *      fields?: Record<string, any>,
- *      tmpFileName: string,
- *      hash?: string,
- *      size?: number,
- *    },
+ *    file: TFileObj,
  *    fileHref: string,
  *    attachment: {
  *      key: string,
  *      description?: string,
+ *      name: string,
+ *      href: string,
  *    },
  *    resource: {
  *      href: string,
  *    },
+ *    ignoreNotFound?: boolean,
  * } } TMultiPartSingleBodyForFileUploads
  */
 
 /**
  * @typedef { {
  *  filename: string,
- *  originalFilename: string,
+ *  originalFilename?: string,
  *  tmpFileName?: string,
+ *  mimetype: string,
+ *  file?: import('stream').Readable,
+ *  fields?: Record<string, any>,
  *  hash?: string,
  *  size?: number,
- *  mimetype: string,
- *  file: import('stream').Readable,
- *  fields: {},
- * } } TFileObj
+* } } TFileObj
  */
+
 
 /**
  * @param {string} href for example /things/123
@@ -81,6 +77,8 @@ function getSafeFilename(filename) {
  * @typedef {import('sri4node').TPluginConfig} TPluginConfig
  * @typedef {import('sri4node').TSriRequest} TSriRequest
  * @typedef {import('sri4node').TSriConfig['resources'][0]['customRoutes'][0]} TCustomRoute
+ * @typedef {import('sri4node').TNonStreamingCustomRoute} TNonStreamingCustomRoute
+ * @typedef {import('sri4node').TStreamingCustomRoute} TStreamingCustomRoute
  * @typedef { import('sri4node').TSriServerInstance['db']} IDatabase
  * @typedef { {
  *  install: (sriConfig: TSriConfig, db: any) => void,
@@ -219,6 +217,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * If fullPluginConfig.createBucketIfNotExists it will try to create the bucket if it does not
    * exsist, otherwise only an error will be printed (which is kind of stupid, it should probably
    * throw an exception)
+   * 
+   * @returns {Promise<void>}
    */
   async function checkOrCreateBucket() {
     const exists = await checkBucket(fullPluginConfig.s3bucket);
@@ -246,6 +246,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
   }
 
+  /**
+   * 
+   * @param {string} s3filename 
+   * @returns {Promise<S3.HeadObjectCommandOutput>}
+   */
   async function headFromS3(s3filename) {
     debug(`get HEAD for ${s3filename}`);
 
@@ -258,7 +263,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    * Any error currently is silently discarded,
-   * so if thois method returns null, it mans there was a problem
+   * so if this method returns null, it mans there was a problem
+   *
+   * @param {string} s3filename 
+   * @returns {Promise<S3.HeadObjectCommandOutput>}
    */
   async function getFileMeta(s3filename) {
     let data = null;
@@ -344,6 +352,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
   }
 
+  /**
+   * 
+   * @param {string[]} filenames 
+   * @returns {Promise<void>}
+   */
   async function deleteFromS3(filenames) {
     const awss3 = getAWSS3Client();
 
@@ -446,10 +459,22 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
   }
 
+  /**
+   * 
+   * @param {string} filename 
+   * @returns {string}
+   */
   function getTmpFilename(filename) {
     return `${uuidv4()}-${filename}.tmp`;
   }
 
+  /**
+   * 
+   * @param {string} destionationFileName 
+   * @param {string} sourceFileName 
+   * @param {string} attachmentKey 
+   * @returns {Promise<S3.CopyObjectCommandOutput>}
+   */
   async function copyFile(destionationFileName, sourceFileName, attachmentKey) {
     const awss3 = getAWSS3Client();
     const params = {
@@ -481,6 +506,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   /**
    *
    * @param {TMultiPartSingleBodyForFileUploads} fileWithJson
+   * @returns {Promise<void>}
    */
   async function renameFile(fileWithJson) {
     const { file } = fileWithJson;
@@ -497,7 +523,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    *
    * @param {import('stream').Readable} fileStream
    * @param {string} tmpFileName
-   * @returns
+   * @returns {Promise<S3.PutObjectCommandOutput>}
    */
   async function handleFileUpload(fileStream, tmpFileName) {
     const awss3 = getAWSS3Client();
@@ -561,12 +587,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    *
-   * @param {IDatabase} tx
    * @param {TSriRequest} sriRequest
    * @param {string} filename
-   * @returns
+   * @returns {Promise<void>}
    */
-  async function handleFileDelete(tx, sriRequest, filename) {
+  async function handleFileDelete(sriRequest, filename) {
     const remoteFilename = getS3FileNameBySriRequestAndAttachmentFilename(
       sriRequest,
       filename
@@ -574,7 +599,6 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     debug(`Deleting file ${remoteFilename}`);
     try {
       await deleteFromS3([remoteFilename]);
-      return { status: 204 };
     } catch (err) {
       error(`Unable to delete file [${remoteFilename}]`);
       error(err);
@@ -591,12 +615,16 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
   }
 
+  /**
+   * 
+   * @returns {Promise<S3PresignedPost.PresignedPost>}
+   */
   async function getPreSigned() {
     debug("getting presigned post for s3");
 
     const awss3 = getAWSS3Client();
 
-    return await createPresignedPost(awss3, {
+    return await S3PresignedPost.createPresignedPost(awss3, {
       Bucket: fullPluginConfig.s3bucket,
       Conditions: [["starts-with", "$key", "tmp"]],
       // some kind of random tmp key?
@@ -656,7 +684,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    *
-   * @param {*} tx
+   * @param {IDatabase} tx
    * @param {TSriRequest} sriRequest
    * @param {Array<TMultiPartSingleBodyForFileUploads>} bodyJson
    * @param {(href: string) => string} getResourceHrefByAttachmentHref translates the href of the
@@ -771,7 +799,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    *
-   * @param {*} file
+   * @param {TFileObj} file
    * @param {Array<TMultiPartSingleBodyForFileUploads>} bodyJson
    * @param {TSriRequest} sriRequest
    */
@@ -794,8 +822,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * BEWARE: THIS FUNCTION MODIFIES the bodyJson parameter !!!
    *
    * @param {Array<TMultiPartSingleBodyForFileUploads>} bodyJson
-   * @param {*} sriRequest
-   * @param {*} attachmentsRcvd
+   * @param {TSriRequest} sriRequest
+   * @param {*} attachmentsRcvd   TODO: type!
    */
   function checkFileForBodyJson(bodyJson, sriRequest, attachmentsRcvd) {
     // validate JSONs for each of the files
@@ -891,6 +919,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
        * @param {import('stream').Readable} stream
        */
       streamingHandler: async (tx, sriRequest, stream) => {
+        /** @type {Array<TFileObj>} */
         const attachmentsRcvd = [];
         const fieldsRcvd = {};
 
@@ -919,7 +948,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
         sriRequest.busBoy.on(
           "file",
-          async (fieldname, file, { filename, encoding, mimeType }) => {
+          async (fieldname, fileStream, { filename, encoding, mimeType }) => {
             const safeFilename = getSafeFilename(filename);
 
             sriRequest.logDebug(
@@ -927,11 +956,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
               `File [${fieldname}]: filename: ${safeFilename}, encoding: ${encoding}, mimetype: ${mimeType}`
             );
 
+            /** @type {TFileObj} */
             const fileObj = {
               filename: safeFilename,
               originalFilename: filename,
               mimetype: mimeType,
-              file,
+              file: fileStream,
               fields: {},
             };
 
@@ -956,10 +986,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           (
             fieldname,
             val,
-            _fieldnameTruncated,
-            _valTruncated,
-            _encoding,
-            _mimetype
+            _info,
           ) => {
             sriRequest.logDebug(
               logChannel,
@@ -971,7 +998,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
         // wait until busboy is done
         await pEvent(sriRequest.busBoy, "close");
-        sriRequest.logDebug(logChannel, "busBoy is done"); // , attachmentsRcvd)
+        sriRequest.logDebug(logChannel, "busBoy is done");
 
         await Promise.all(tmpUploads);
         sriRequest.logDebug(logChannel, "tmp uploads done");
@@ -1178,6 +1205,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       httpMethods: ["POST"],
       readOnly: false,
 
+      /**
+       * 
+       * @param {IDatabase} tx 
+       * @param {TSriRequest} sriRequest 
+       * @returns 
+       */
       handler: async (tx, sriRequest) => {
         const attachmentsRcvd = [];
         const fieldsRcvd = {};
@@ -1295,7 +1328,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
         // now that we validated the json body resource requirement, we can finally check security
         try {
-          await checkSecurity(tx, sriRequest, bodyJson, "create");
+          await checkSecurity(tx, sriRequest, bodyJsonArray, "create");
         } catch (err) {
           securityError = err;
         }
@@ -1334,7 +1367,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           // stream.push(failed);
         } else {
           /// all went well, rename the files to their real names now.
-          bodyJson
+          bodyJsonArray
             .filter((e) => e.file !== undefined)
             .forEach((file) => {
               renames.push(renameFile(file));
@@ -1343,7 +1376,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           await Promise.all(renames);
 
           const response = [];
-          bodyJson.forEach((file) => {
+          bodyJsonArray.forEach((file) => {
             response.push({
               status: 200,
               href: `${file.resource.href}/attachments/${file.attachment.key}`,
@@ -1370,11 +1403,17 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       routePostfix: "/attachments/presigned",
       httpMethods: ["GET"],
       readOnly: true,
-      beforeHandler: async (_tx, _sriRequest) => {
+      /**
+       * @type { TNonStreamingCustomRoute['beforeHandler'] }
+       */
+      beforeHandler: async (_tx, _sriRequest, _customMapping) => {
         // await checkSecurity(tx, sriRequest, null, 'create');
       },
+      /**
+       * @type { TNonStreamingCustomRoute['handler'] }
+       */
       handler: async (_tx, _sriRequest) => {
-        /// dp the presigned request to s3
+        /// do the presigned request to s3
         const json = await getPreSigned();
         return {
           body: json,
@@ -1400,10 +1439,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       binaryStream: true,
 
       /**
-       * TODO: Hmm typing error, does that mean that this handler must be synchronous?
-       * in that case: should we check security somewhere else, maybe in transformRequest?
-       *
-       * @type { TSriConfig['resources'][0]['customRoutes'][0]['beforeStreamingHandler'] }
+       * @type { TStreamingCustomRoute['beforeStreamingHandler'] }
        */
       beforeStreamingHandler: async (tx, sriRequest, _customMapping) => {
         await checkSecurity(tx, sriRequest, null, "read");
@@ -1429,8 +1465,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           ],
         };
       },
-      /** @type { TSriConfig['resources'][0]['customRoutes'][0]['streamingHandler'] } */
-      streamingHandler: async (tx, sriRequest, /** @type {import('stream').Readable} */ stream) => {
+      /**
+       * @type { TStreamingCustomRoute['streamingHandler'] }
+       */
+      streamingHandler: async (tx, sriRequest, stream) => {
         await handleFileDownload(tx, sriRequest, stream, false);
         sriRequest.logDebug(logChannel, "streaming download done");
         return null;
@@ -1456,9 +1494,15 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       routePostfix: "/:key/attachments/:attachmentKey",
       readOnly: false,
       httpMethods: ["DELETE"],
+      /**
+       * @type { TNonStreamingCustomRoute['beforeHandler'] }
+       */
       beforeHandler: async (tx, sriRequest) => {
         await checkSecurity(tx, sriRequest, null, "delete");
       },
+      /**
+       * @type { TNonStreamingCustomRoute['handler'] }
+       */
       handler: async (tx, sriRequest) => {
         const filename = await getFileNameHandler(
           tx,
@@ -1466,7 +1510,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           sriRequest.params.key,
           sriRequest.params.attachmentKey
         );
-        await handleFileDelete(tx, sriRequest, filename);
+        await handleFileDelete(sriRequest, filename);
         return {
           status: 204,
         };
