@@ -701,9 +701,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     getResourceHrefByAttachmentHref
   ) {
     let toCopy = bodyJson.filter((e) => e.fileHref);
-    if (!toCopy.length) {
-      return bodyJson;
-    }
+
+    // a useless early exit?
+    // if (!toCopy.length) {
+    //   return bodyJson;
+    // }
 
     sriRequest.logDebug(logChannel, "copy attachments");
     const resources = new Set(
@@ -1241,7 +1243,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
        *
        * @param {IDatabase} tx
        * @param {TSriRequest} sriRequest
-       * @returns
+       * @returns {Promise<import("sri4node").TSriResult>}
        */
       handler: async (tx, sriRequest, _customMapping, _internalUtils) => {
         const attachmentsRcvd = [];
@@ -1278,7 +1280,6 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         }
 
         let securityError;
-        const renames = [];
 
         validateRequestData(bodyJsonArray, sriRequest);
 
@@ -1324,7 +1325,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           if (fullPluginConfig.uploadInSequence) {
             // For example Persons Api which uses an sri4node as a proxy for its attachments files
             // should be sequentially uploaded
-            for (const file of bodyJsonArray) {
+            for (const file of bodyJsonArrayWithFileObj) {
               // eslint-disable-next-line no-await-in-loop
               try {
                 await handleTheFile(file);
@@ -1336,26 +1337,22 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
               }
             }
           } else {
-            const uploads = [];
-
-            bodyJsonArray.forEach((file) => {
-              uploads.push(
-                handleTheFile(file)
-                  .then((_suc) => {
-                    debug("handleFile success");
-                  })
-                  .catch((ex) => {
-                    sriRequest.logDebug(logChannel, "handlefile failed");
-                    sriRequest.logDebug(logChannel, ex);
-                    failed.push(ex);
-                  })
-              );
-            });
+            const uploads = bodyJsonArrayWithFileObj.map((file) =>
+              handleTheFile(file)
+                .then((_suc) => {
+                  debug("handleFile success");
+                })
+                .catch((ex) => {
+                  sriRequest.logDebug(logChannel, "handlefile failed");
+                  sriRequest.logDebug(logChannel, ex);
+                  failed.push(ex);
+                })
+            );
             await Promise.all(uploads);
           }
         } else {
           try {
-            // TODO FIXME: add a test case for this code path, accordingto the typing,
+            // TODO FIXME: add a test case for this code path, according to the typing,
             // the next line is not going to work
             await handleTheFile(bodyJsonArrayWithFileObj);
             debug("handleFile success");
@@ -1407,16 +1404,15 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           // stream.push(failed);
         } else {
           /// all went well, rename the files to their real names now.
-          bodyJsonArray
+          const renames = bodyJsonArrayWithFileObj
             .filter((e) => e.file !== undefined)
-            .forEach((file) => {
-              renames.push(renameFile(file));
-            });
+            .map((file) => renameFile(file));
 
           await Promise.all(renames);
 
-          /** @type {Array<import("sri4node").TSriResult>} */
-          return bodyJsonArray.map((file) => ({
+          // TODO: fix this, because the handler currently expects a return value
+          // of type TSriResult instead of Array<TSriResult>
+          return bodyJsonArrayWithFileObj.map((file) => ({
             status: 200,
             href: `${file.resource.href}/attachments/${file.attachment.key}`,
           }));
