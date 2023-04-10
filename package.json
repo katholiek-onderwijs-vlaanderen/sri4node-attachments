@@ -12,7 +12,7 @@
   "dependencies": {
     "mime-types": "^2.1.21",
     "q": "^1.0.1",
-    "aws-sdk": "2.814.0",
+    "aws-sdk": "2.1354.0",
     "uuid": "2.0.x",
     "p-event": "^2.0.0"
   },
