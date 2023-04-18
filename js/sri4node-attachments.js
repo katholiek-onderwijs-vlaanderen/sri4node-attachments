@@ -990,7 +990,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
             sriRequest.logDebug(
               logChannel,
-              `File [${fieldname}]: filename: ${safeFilename}, encoding: ${encoding}, mimetype: ${mimeType}`
+              `BUSBOY File [${fieldname}]: filename: ${safeFilename}, encoding: ${encoding}, mimetype: ${mimeType}`
             );
 
             /** @type {TFileObj} */
@@ -1021,7 +1021,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         sriRequest.busBoy.on("field", (fieldname, val, _info) => {
           sriRequest.logDebug(
             logChannel,
-            `Field [${fieldname}]: value: ${val}`
+            `BUSBOY Field [${fieldname}]: value: ${val}`
           );
           fieldsRcvd[fieldname] = val;
         });

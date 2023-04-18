@@ -98,6 +98,22 @@ async function doPutFile(
     },
   };
 
+  /*
+    I think this translates to something like this (but how do multiple files work?):
+      POST /upload HTTP/1.1
+      Content-Type: multipart/form-data; boundary=------------------------a2b9b4e9d8c7b6a5
+
+      --------------------------a2b9b4e9d8c7b6a5
+      Content-Disposition: form-data; body="[{\"file\":\"thumbsUp.1.png\",\"attachment\":{\"key\":\"19f50272-8438-4662-9386-5fc789420262\",\"description\":\"this is MY file\"},\"resource\":{\"href\":\"/party/19f50272-8438-4662-9386-5fc789420262\"}}]"
+
+      --------------------------a2b9b4e9d8c7b6a5
+      Content-Disposition: form-data; name="data"; filename="thumbsUp.1.png"
+      Content-Type: image/png
+
+      <binary data>
+      --------------------------a2b9b4e9d8c7b6a5--
+  */
+
   return needle("post", resourceUrl + "/attachments", data, options);
 }
 
@@ -340,6 +356,10 @@ exports = module.exports = function (base, type) {
     // customRouteForUpload, customRouteForUploadCopy, customRouteForPreSignedUpload,
     // customRouteForDownload, customRouteForDelete, customRouteForGet
     describe("customRouteForUpload", function () {
+      // TDOO
+    });
+
+    describe("customRouteForUploadCopy", function () {
       // TDOO
     });
   });
