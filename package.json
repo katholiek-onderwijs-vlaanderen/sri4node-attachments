@@ -35,7 +35,8 @@
     "pg": "^8.9.0",
     "prettier": "^2.8.4",
     "rewire": "^6.0.0",
-    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#polish_v2.3"
+    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#polish_v2.3",
+    "stream-equal": "^2.0.1"
   },
   "repository": {
     "type": "git",

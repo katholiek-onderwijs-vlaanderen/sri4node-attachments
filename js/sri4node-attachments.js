@@ -116,7 +116,18 @@ function getSafeFilename(filename) {
  *      afterHandler: (tx: IDatabase, sriRequest: TSriRequest, resourceKey: string, attachmentKey: string) => void
  *    ) => TCustomRoute,
  *    customRouteForGet: (
- *      getFileNameHandler: ( tx:any, sriRequest: TSriRequest, key: string, attachmentKey: string ) => string
+ *      getAttJson: ( tx:any, sriRequest: TSriRequest, key: string, attachmentKey: string ) => Promise<{
+ *        $$meta: {
+ *          created: string,
+ *          modified: string,
+ *          permalink: string,
+ *        }
+ *        href: string;
+ *        key: string;
+ *        name: string;
+ *        contentType: string;
+ *        description: string;
+ *      }>
  *    ) => TCustomRoute,
  * } } TSri4NodeAttachmentUtils
  */
@@ -664,7 +675,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
 
     // allow everything if no security plugin has been configured
-    if (fullPluginConfig.security) {
+    if (fullPluginConfig.security && fullPluginConfig.security.plugin) {
       const security = fullPluginConfig.security.plugin;
       let attAbility = ability;
       if (fullPluginConfig.security.abilityPrepend) {
@@ -838,7 +849,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    *
    * @param {Array<TMultiPartSingleBodyForFileUploads>} bodyJson
    * @param {TSriRequest} sriRequest
-   * @param {Array<TFileObj>} attachmentsRcvd   TODO: type!
+   * @param {Array<TFileObj>} attachmentsRcvd
    * @returns {Array<TMultiPartSingleBodyForFileUploads & {fileObj: TFileObj}>}
    */
   function checkFileForBodyJson(bodyJson, sriRequest, attachmentsRcvd) {
@@ -874,10 +885,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * @throws {SriError}
    * @returns {void}
    */
-  function validateRequestData(bodyJson, sriRequest) {
+  function validateRequestData(bodyJson, sriRequest, copy = false) {
     if (bodyJson.some((e) => !e.attachment)) {
       throw new sriRequest.SriError({
-        status: 409,
+        status: 400,
         errors: [
           {
             code: "missing.json.body.attachment",
@@ -890,7 +901,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
     if (bodyJson.some((e) => !e.attachment.key)) {
       throw new sriRequest.SriError({
-        status: 409,
+        status: 400,
         errors: [
           {
             code: "missing.json.attachment.key",
@@ -904,7 +915,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     bodyJson.forEach((att) => {
       if (!att.resource || !att.resource.href) {
         throw new sriRequest.SriError({
-          status: 409,
+          status: 400,
           errors: [
             {
               code: "missing.json.body.resource",
@@ -915,6 +926,20 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         });
       }
     });
+
+    if (copy && bodyJson.some((e) => !e.fileHref)) {
+      throw new sriRequest.SriError({
+        status: 400,
+        errors: [
+          {
+            code: "missing.json.fileHref",
+            type: "ERROR",
+            message: "each json item needs a fileHref",
+          },
+        ],
+      });
+    }
+
   }
 
   /**
@@ -1228,6 +1253,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   /**
    * A function that will generate a json object that can be used in
    * sriConfig.resources.*.customRoutes in order to add a POST /resource/attachments/copy route.
+   * 
+   * Creates a copy of attachments directly on S3 based on their attachment href to avoid
+   * downloading and uploading attachments.
+   * 
+   * [ used by activityplans-api and content-api when an activityplan or content item is copied ]
    *
    * @param { (tx: IDatabase, sriRequest: TSriRequest, att: TMultiPartSingleBodyForFileUploadsWithFileObj) => void } runAfterUpload
    * @param {(href: string) => string} [getResourceForCopy] turns the href of the resource to copy the attachment from into the href of the resource to copy the attachment to
@@ -1281,7 +1311,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
         let securityError;
 
-        validateRequestData(bodyJsonArray, sriRequest);
+        validateRequestData(bodyJsonArray, sriRequest, true);
 
         /** @type {Array<TMultiPartSingleBodyForFileUploadsWithFileObj>} */
         let bodyJsonArrayWithFileObj;
@@ -1410,12 +1440,13 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
           await Promise.all(renames);
 
-          // TODO: fix this, because the handler currently expects a return value
-          // of type TSriResult instead of Array<TSriResult>
-          return bodyJsonArrayWithFileObj.map((file) => ({
+          return {
             status: 200,
-            href: `${file.resource.href}/attachments/${file.attachment.key}`,
-          }));
+            body: bodyJsonArrayWithFileObj.map((file) => ({
+              status: 200,
+              href: `${file.resource.href}/attachments/${file.attachment.key}`,
+            })),
+          };
         }
       },
     };
@@ -1428,6 +1459,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * This is something specific to upload a file directly to S3 or something
    * (without proxying through the api server) by requesting some kind of token first
    * and then using that to be allowed to upload something directly to S3.
+   * 
+   * [ Currently not used ]
    *
    * @returns {TCustomRoute}
    */
@@ -1521,11 +1554,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    * A function that will generate a json object that can be used in
-   * sriConfig.resources.*.customRoutes in order to add a DLETE
+   * sriConfig.resources.*.customRoutes in order to add a DELETE
    * /resource/:key/attachments/:attachmentKey route to delete an attachment.
-   * This is something specific to upload a file directly to S3 or something
-   * (without proxying through the api server) by requesting some kind of token first
-   * and then using that to be allowed to upload something directly to S3.
    *
    * @param {(tx: any, sriRequest: TSriRequest, resourceKey: string, attachmentKey: string) => Promise<string>} getFileNameHandler an (async) function that will return the right filename (can do a search on the database for example)
    * @param {any} afterHandler
@@ -1573,9 +1603,6 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * A function that will generate a json object that can be used in
    * sriConfig.resources.*.customRoutes in order to add a GET
    * /resource/:key/attachments/:attachmentKey route to get an attachment.
-   * This is something specific to upload a file directly to S3 or something
-   * (without proxying through the api server) by requesting some kind of token first
-   * and then using that to be allowed to upload something directly to S3.
    *
    * @param { ( tx:any, sriRequest: TSriRequest, key: string, attachmentKey: string )
    *   => string } getAttJson

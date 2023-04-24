@@ -6,10 +6,44 @@
  * @returns {import("sri4node").TResourceDefinition}
  */
 module.exports = function (sri4node, attachments, type) {
-  // const $u = sri4node.utils;
   const $m = sri4node.mapUtils;
   const $s = sri4node.schemaUtils;
   const $q = sri4node.queryUtils;
+
+  const resourceMap = {};
+
+  /**
+   * Store attachment data in a local object for testing
+   * @param {*} file 
+   */
+  function storeAttachment(file) {
+    const resourceKey = file.resource.href.split('/').pop();
+    const attachmentKey = file.attachment.key;
+    if (resourceMap[resourceKey] === undefined) {
+      resourceMap[resourceKey] = {};
+    }
+    resourceMap[resourceKey][attachmentKey] = file;
+  }
+
+  /**
+   * Create attachment JSON for testing
+   * @returns 
+   */
+  function attachmentJson(attFile, resourceKey, attachmentKey) {
+    const nowString = (new Date()).toISOString();
+    return {
+      '$$meta': {
+        created: nowString,
+        modified: nowString,
+        permalink: `${type}/${resourceKey}/attachments/${attachmentKey}`,
+      },
+      href: `${type}/${resourceKey}/attachments/${attFile.file}`,
+      key: attFile.attachment.key,
+      name: attFile.file,
+      description: attFile.attachment.description,
+      contentType: attFile.fileObj.mimeType,
+    }
+  }
 
   return {
     // Base url, maps 1:1 with a table in postgres
@@ -123,29 +157,42 @@ module.exports = function (sri4node, attachments, type) {
     },
     customRoutes: [
       attachments.customRouteForUpload(async function (_tx, _sriRequest, file) {
-        // TODO: probably verify if this funtion is called when expected
-        console.log(`RUN_AFTER_UPLOAD: ${file.fileObj.filename}`);
-        // console.log(JSON.stringify(file, null, 2));
+        storeAttachment(file);
+      }, s => s),
+      attachments.customRouteForUploadCopy(async function (_tx, _sriRequest, file) {
+        storeAttachment(file);
       }, s => s),
       attachments.customRouteForDownload(),
       attachments.customRouteForDelete(
-        async (_tx, sriRequest, _resourceKey, _attachmentKey) =>
-          sriRequest.params.attachmentKey,
+        async (_tx, _sriRequest, resourceKey, attachmentKey) =>
+          resourceMap[resourceKey][attachmentKey].file,
         async (_tx, _sriRequest, resourceKey, attachmentKey) => {
-          console.log(`RUN_AFTER_DELETE: ${resourceKey}, ${attachmentKey}`);
+          delete resourceMap[resourceKey][attachmentKey];
         }
       ),
-      // TODO: probably these routes also need to be tested !!!
-      // attachments.customRouteForGet(getAttJson)
+      attachments.customRouteForGet( async function (_tx, sriRequest, resourceKey, attachmentKey) {
+        const attFile = resourceMap[resourceKey][attachmentKey];
+        if (attFile !== undefined) {
+          return attachmentJson(attFile, resourceKey, attachmentKey)
+        } else {
+          throw new sriRequest.SriError({
+            status: 404,
+            errors: [],
+          });
+        }
+      }
+     )
     ],
-
-    // persons-api-sri4node
-    // customRoutes: [
-    //   attachments.customRouteForUpload(uploadFile),
-    //   attachments.customRouteForDownload(),
-    //   attachments.customRouteForDelete(getFileName, deleteFile),
-    //   attachments.customRouteForGet(getAttJson)
-    //   //, attachments.customRouteForPreSignedUpload()
-    // ]
+    afterRead: [ ( _tx, _sriRequest, data) => {
+      data.forEach(({ permalink, stored }) => {
+        const resourceKey = permalink.split('/').pop();
+        console.log(permalink)
+        stored.attachments = 
+        Object.entries(resourceMap[resourceKey]).map(([attachmentKey, attFile]) => {
+          return attachmentJson(attFile, resourceKey, attachmentKey)
+        })
+      })
+      }
+    ],
   };
 };
