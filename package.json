@@ -4,7 +4,7 @@
   "description": "A standard implementation to support attachments on sri4node resources.",
   "main": "js/sri4node-attachments.js",
   "scripts": {
-    "pretest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml up --wait && sleep 3 && docker compose -f ./test/docker-compose.yml exec localstack  awslocal s3api create-bucket --bucket tests3bucket",
+    "pretest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml down --volumes --rmi=local --remove-orphans; DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml up --wait && sleep 3 && docker compose -f ./test/docker-compose.yml exec localstack  awslocal s3api create-bucket --bucket tests3bucket",
     "test": "mocha --timeout 5000 test/tests.js",
     "posttest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml down --volumes --rmi=local --remove-orphans",
     "test-dev": "env $(cat .env) mocha --debug-brk",
@@ -35,8 +35,7 @@
     "pg": "^8.9.0",
     "prettier": "^2.8.4",
     "rewire": "^6.0.0",
-    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#polish_v2.3",
-    "stream-equal": "^2.0.1"
+    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#polish_v2.3"
   },
   "repository": {
     "type": "git",

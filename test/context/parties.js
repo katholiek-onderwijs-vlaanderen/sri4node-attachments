@@ -14,10 +14,10 @@ module.exports = function (sri4node, attachments, type) {
 
   /**
    * Store attachment data in a local object for testing
-   * @param {*} file 
+   * @param {*} file
    */
   function storeAttachment(file) {
-    const resourceKey = file.resource.href.split('/').pop();
+    const resourceKey = file.resource.href.split("/").pop();
     const attachmentKey = file.attachment.key;
     if (resourceMap[resourceKey] === undefined) {
       resourceMap[resourceKey] = {};
@@ -27,12 +27,12 @@ module.exports = function (sri4node, attachments, type) {
 
   /**
    * Create attachment JSON for testing
-   * @returns 
+   * @returns
    */
   function attachmentJson(attFile, resourceKey, attachmentKey) {
-    const nowString = (new Date()).toISOString();
+    const nowString = new Date().toISOString();
     return {
-      '$$meta': {
+      $$meta: {
         created: nowString,
         modified: nowString,
         permalink: `${type}/${resourceKey}/attachments/${attachmentKey}`,
@@ -42,7 +42,7 @@ module.exports = function (sri4node, attachments, type) {
       name: attFile.file,
       description: attFile.attachment.description,
       contentType: attFile.fileObj.mimeType,
-    }
+    };
   }
 
   return {
@@ -156,12 +156,18 @@ module.exports = function (sri4node, attachments, type) {
       },
     },
     customRoutes: [
-      attachments.customRouteForUpload(async function (_tx, _sriRequest, file) {
-        storeAttachment(file);
-      }, s => s),
-      attachments.customRouteForUploadCopy(async function (_tx, _sriRequest, file) {
-        storeAttachment(file);
-      }, s => s),
+      attachments.customRouteForUpload(
+        async function (_tx, _sriRequest, file) {
+          storeAttachment(file);
+        },
+        (s) => s
+      ),
+      attachments.customRouteForUploadCopy(
+        async function (_tx, _sriRequest, file) {
+          storeAttachment(file);
+        },
+        (s) => s
+      ),
       attachments.customRouteForDownload(),
       attachments.customRouteForDelete(
         async (_tx, _sriRequest, resourceKey, attachmentKey) =>
@@ -170,29 +176,35 @@ module.exports = function (sri4node, attachments, type) {
           delete resourceMap[resourceKey][attachmentKey];
         }
       ),
-      attachments.customRouteForGet( async function (_tx, sriRequest, resourceKey, attachmentKey) {
+      attachments.customRouteForGet(async function (
+        _tx,
+        sriRequest,
+        resourceKey,
+        attachmentKey
+      ) {
         const attFile = resourceMap[resourceKey][attachmentKey];
         if (attFile !== undefined) {
-          return attachmentJson(attFile, resourceKey, attachmentKey)
+          return attachmentJson(attFile, resourceKey, attachmentKey);
         } else {
           throw new sriRequest.SriError({
             status: 404,
             errors: [],
           });
         }
-      }
-     )
+      }),
     ],
-    afterRead: [ ( _tx, _sriRequest, data) => {
-      data.forEach(({ permalink, stored }) => {
-        const resourceKey = permalink.split('/').pop();
-        console.log(permalink)
-        stored.attachments = 
-        Object.entries(resourceMap[resourceKey]).map(([attachmentKey, attFile]) => {
-          return attachmentJson(attFile, resourceKey, attachmentKey)
-        })
-      })
-      }
+    afterRead: [
+      (_tx, _sriRequest, data) => {
+        data.forEach(({ permalink, stored }) => {
+          const resourceKey = permalink.split("/").pop();
+          console.log(permalink);
+          stored.attachments = Object.entries(resourceMap[resourceKey]).map(
+            ([attachmentKey, attFile]) => {
+              return attachmentJson(attFile, resourceKey, attachmentKey);
+            }
+          );
+        });
+      },
     ],
   };
 };
