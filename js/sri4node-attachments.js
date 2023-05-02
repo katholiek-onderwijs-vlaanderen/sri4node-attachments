@@ -1498,7 +1498,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           // stream.push(failed);
         } else {
           /// all went well, rename the files to their real names now.
-          const renames = newBodyArrayWithFileObj
+          const renames = bodyJsonArrayWithFileObj
             .filter((e) => e.file !== undefined)
             .map((file) => renameFile(file));
 
@@ -1506,7 +1506,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
           return {
             status: 200,
-            body: newBodyArrayWithFileObj.map((file) => ({
+            body: bodyJsonArrayWithFileObj.map((file) => ({
               status: 200,
               href: `${file.resource.href}/attachments/${file.attachment.key}`,
             })),
