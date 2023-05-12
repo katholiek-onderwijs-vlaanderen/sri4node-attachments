@@ -160,18 +160,16 @@ module.exports = function (sri4node, attachments, type) {
         async function (_tx, _sriRequest, file) {
           storeAttachment(file);
         },
-        (s) => s
       ),
       attachments.customRouteForUploadCopy(
         async function (_tx, _sriRequest, file) {
           storeAttachment(file);
         },
-        (s) => s
       ),
       attachments.customRouteForDownload(),
       attachments.customRouteForDelete(
         async (_tx, _sriRequest, resourceKey, attachmentKey) =>
-          resourceMap[resourceKey][attachmentKey].file,
+          resourceMap[resourceKey][attachmentKey].fileObj.filename,
         async (_tx, _sriRequest, resourceKey, attachmentKey) => {
           delete resourceMap[resourceKey][attachmentKey];
         }

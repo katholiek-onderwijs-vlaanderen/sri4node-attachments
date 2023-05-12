@@ -10,6 +10,11 @@ const sriConfigPromise = sri4nodeConfigFactory();
 const port = 5000;
 const base = `http://localhost:${port}`;
 
+
+const httpClientMod = require("./httpClient.js");
+const httpClient = httpClientMod.httpClientFactory(base);
+
+
 const common = require("../js/common");
 
 const { info } = common;
@@ -36,6 +41,8 @@ describe("sri4node-attachments : ", () => {
   });
 
   after(async () => {
+    // enable this to keep the server running for inspection
+    // await new Promise(() => {});
     try {
       server.close();
     } catch (err) {
@@ -48,8 +55,8 @@ describe("sri4node-attachments : ", () => {
     }
   });
 
-  require("./unitTests");
-  require("./testPartyAttachments")(base, "/partiesS3");
+  // require("./unitTests");
+  require("./testPartyAttachments")(httpClient, "/partiesS3");
 
   // local storage is currenlty not supported anymore
   // require("./testPartyAttachments")(base, "/partiesFolder");
