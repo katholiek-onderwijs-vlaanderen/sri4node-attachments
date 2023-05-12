@@ -30,6 +30,8 @@ const { v4: uuidv4 } = require("uuid");
  * @typedef { TMultiPartSingleBodyForFileUploads & { fileHref: string } } TBodyForFileCopy
  *
  * @typedef { TMultiPartSingleBodyForFileUploads & { fileObj: TFileObj } } TMultiPartSingleBodyForFileUploadsWithFileObj
+ * 
+ * @typedef { import("stream").Readable } TReadableStream
  */
 
 /**
@@ -102,7 +104,8 @@ function getSafeFilename(filename) {
  *    security?: { plugin?: any, abilityPrepend: string, abilityAppend: string },
  * } } TSri4NodeAttachmentUtilsConfig
  *
- * @typedef { (tx: IDatabase, sriRequest: TSriRequest, att: TMultiPartSingleBodyForFileUploadsWithFileObj) => void } TRunAfterUploadFun
+ * @typedef { (tx: IDatabase, sriRequest: TSriRequest,
+ *        att: TMultiPartSingleBodyForFileUploadsWithFileObj | Array<TMultiPartSingleBodyForFileUploadsWithFileObj>) => void } TRunAfterUploadFun
  * @typedef { ( tx:any, sriRequest: TSriRequest, key: string, attachmentKey: string ) => Promise<{
  *        $$meta: {
  *          created: string,
@@ -198,7 +201,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * This method will send a HeadBucketCommand, and wioll return true if it works,
    * and false if any exception occurs.
    *
-   * @param {*} bucket
+   * @param {string} bucket
    * @returns
    */
   async function checkBucket(bucket) {
@@ -291,7 +294,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    *
-   * @param {import('stream').Readable} outstream
+   * @param {TReadableStream} outstream
    * @param {string} filename
    * @returns {Promise<void>}
    * @rejects {number | Error} if S3.send gives reply with http status code, we return the statuscode; else the error instance
@@ -1077,7 +1080,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * 
    * @param {*} fullPluginConfig 
    * @param {TSriRequest} sriRequest 
-   * @param {*} runAfterUpload 
+   * @param {TRunAfterUploadFun} runAfterUpload 
    * @param {Array<TMultiPartSingleBodyForFileUploadsWithFileObj>} fileArrayWithFileObj 
    */
   async function applyRunAfterUploadFun(fullPluginConfig, sriRequest, runAfterUpload, fileArrayWithFileObj) {
@@ -1215,6 +1218,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     throw err;
   }
 
+  /**
+   * When enabled fullPluginConfig, this function will check at S3 wether a file already exists
+   * and throw an error if it already exist.
+   * @param { Array<TMultiPartSingleBodyForFileUploads & { fileObj: TFileObj; }> } attachmentsWithFileObj
+   * @param { TSriRequest } sriRequest 
+   */
   async function checkAttachmentsFileExistence(attachmentsWithFileObj, sriRequest) {
     if (fullPluginConfig.checkFileExistence) {
       await checkExistence(
@@ -1225,6 +1234,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
 
+  /**
+   * This will cover standard usage of the plugin.
+   * There does not seem to be projects implementing this differently.
+   * @param {string} fileHref 
+   * @returns {string}
+   */
   function defaultGetResourceForCopy(fileHref) {
     return fileHref.substring(0, fileHref.indexOf('/attachments/'));
   }
@@ -1325,6 +1340,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
               mimetype: mime.contentType(file.filename)
             });
 
+          /** @type { Array<TMultiPartSingleBodyForFileUploads & { fileObj: TFileObj; }> } */
           allAttachmentsWithFileObj = [
             ...copiedAttachmentsWithFileObj.map(addMimeType),
             ...uploadedAttachmentsWithFileObj.map(addMimeType)

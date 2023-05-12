@@ -55,7 +55,7 @@ describe("sri4node-attachments : ", () => {
     }
   });
 
-  // require("./unitTests");
+  require("./unitTests");
   require("./testPartyAttachments")(httpClient, "/partiesS3");
 
   // local storage is currenlty not supported anymore

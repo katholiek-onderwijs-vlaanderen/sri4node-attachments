@@ -22,9 +22,8 @@ const fs = require("fs");
  * 
  * @typedef { import("./httpClient.js").THttpClient } THttpClient
  * @typedef { import("./httpClient.js").THttpResponse } THttpResponse
- * @typedef { import("stream").Readable } TReadableStream
+ * @typedef { import("../js/sri4node-attachments.js").TReadableStream } TReadableStream
  */
-
 
 /**
  * This function does a GET requests as a streaming request and when succesfull, returns
