@@ -1668,5 +1668,5 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 }
 
 module.exports = {
-  sri4nodeAttchmentUtilsFactory: sri4nodeAttachmentUtilsFactory,
+  sri4nodeAttachmentUtilsFactory,
 };
