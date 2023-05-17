@@ -98,6 +98,7 @@ function getSafeFilename(filename) {
  *  [prop:string]: unknown,
  * } } TSri4NodePluginInstance
  * @typedef { {
+ *    endpoint?: string,
  *    s3key: string,
  *    s3region: string,
  *    s3bucket: string,
@@ -162,7 +163,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   // default configuration
   const fullPluginConfig = {
-    endpoint: "http://localhost:4566/",
+    endpoint: "",
     s3key: "",
     s3secret: "",
     s3bucket: "",

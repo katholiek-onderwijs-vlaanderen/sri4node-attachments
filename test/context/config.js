@@ -1,8 +1,6 @@
 /* Configuration for sri4node, used for our server.js, but also for mocha tests */
 const sri4node = require("sri4node");
-const {
-  sri4nodeAttchmentUtilsFactory: sri4nodeAttachmentUtilsFactory,
-} = require("../../js/sri4node-attachments.js");
+const { sri4nodeAttachmentUtilsFactory } = require("../../js/sri4node-attachments.js");
 const partiesFactory = require("./parties");
 
 /**
@@ -12,6 +10,7 @@ const partiesFactory = require("./parties");
 module.exports = async function (handleMultipleUploadsTogether = false, uploadInSequence = true, customStoreAttachment = undefined) {
   const attachmentUtilsForS3 = await sri4nodeAttachmentUtilsFactory(
     {
+      endpoint: "http://localhost:4566/",
       s3key: "",
       s3secret: "",
       s3bucket: "tests3bucket",
