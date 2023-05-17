@@ -5,7 +5,7 @@
  * @param {string} type
  * @returns {import("sri4node").TResourceDefinition}
  */
-module.exports = function (sri4node, attachments, type) {
+module.exports = function (sri4node, attachments, type, customStoreAttachment = undefined) {
   const $m = sri4node.mapUtils;
   const $s = sri4node.schemaUtils;
   const $q = sri4node.queryUtils;
@@ -158,12 +158,12 @@ module.exports = function (sri4node, attachments, type) {
     customRoutes: [
       attachments.customRouteForUpload(
         async function (_tx, _sriRequest, file) {
-          storeAttachment(file);
+          customStoreAttachment ? customStoreAttachment(file) : storeAttachment(file);
         },
       ),
       attachments.customRouteForUploadCopy(
         async function (_tx, _sriRequest, file) {
-          storeAttachment(file);
+          customStoreAttachment ? customStoreAttachment(file) : storeAttachment(file);
         },
       ),
       attachments.customRouteForDownload(),

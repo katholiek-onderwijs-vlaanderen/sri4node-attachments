@@ -61,6 +61,31 @@ const deleteAttachmentAndVerify = async (
   assert.equal(responseGetAtt3.status, 404);
 };
 
+
+/**
+ * Creates the JSON body describing the attachment files, which can be passed at multipart
+ * upload or at /attachments/copy ?
+ * @param {Array<TFileToUpload | TFileToCopy>} fileDetails 
+ * @returns 
+ */
+const createUploadBody = (fileDetails) => {
+  return fileDetails.map(
+    ({ remotefileName, attachmentKey, resourceHref, urlToCopy }) => ({
+      file: remotefileName,
+      fileHref: urlToCopy, // can be undefined, but if it's there, this is the url that should be copied
+      // instead of uploading a local file
+      attachment: {
+        key: attachmentKey,
+        description: `this is MY file with key ${attachmentKey}`,
+        aCustomTestProperty: 1000,
+      },
+      resource: {
+        href: resourceHref,
+      },
+    })
+  )
+}
+
 /**
  * This will use the /resource/attachments endpoint to upload one or multiple files.
  * This is a multipart post, where the 'body' part is a stringified and properly escaped
@@ -144,21 +169,7 @@ const deleteAttachmentAndVerify = async (
  * @returns {Promise<THttpResponse>} a http response
  */
 async function doPutFiles(httpClient, resourceUrl, fileDetails) {
-  const body = fileDetails.map(
-    ({ remotefileName, attachmentKey, resourceHref, urlToCopy }) => ({
-      file: remotefileName,
-      fileHref: urlToCopy, // can be undefined, but if it's there, this is the url that should be copied
-      // instead of uploading a local file
-      attachment: {
-        key: attachmentKey,
-        description: `this is MY file with key ${attachmentKey}`,
-      },
-      resource: {
-        href: resourceHref,
-      },
-    })
-  )
-
+  const body = createUploadBody(fileDetails);
   const formData = new FormData();
   formData.append('body', JSON.stringify(body));
 
@@ -294,6 +305,32 @@ async function uploadFilesAndCheck(httpClient, filesToPut) {
     await checkUploadedFiles(httpClient, filesToPut);
   } else {
     assert.fail("[uploadFilesAndCheck]: filesToPut is empty or not defined.");
+  }
+}
+
+async function copyFilesAndCheck(httpClient, filesToPut) {
+  if (filesToPut && filesToPut.length > 0) {
+    const href = filesToPut[0].resourceHref;
+    const basePath = href.substring(0, href.lastIndexOf("/"));
+
+    const body = createUploadBody(filesToPut);
+
+    const responseStreaming = await httpClient.post({
+      path: `${basePath}/attachments/copy`,
+      body,
+      streaming: true, // ask for streaming response
+    });
+
+    const response = {
+      ...responseStreaming,
+      body: (await getStreamAsBuffer(responseStreaming.body)).toString(),
+    }
+
+    assert.equal(response.status, 200);
+
+    await checkUploadedFiles(httpClient, filesToPut);
+  } else {
+    assert.fail("[copyFilesAndCheck]: filesToPut is empty or not defined.");
   }
 }
 
@@ -713,34 +750,21 @@ exports = module.exports = function (httpClient, type) {
         assert.equal(copyResponse.status, 201);
 
         const attachmentCopyKey = uuid.v4();
-        const copyAttBody = [
-          {
-            file: "profile1.png",
-            fileHref: attachmentDownloadUrl,
-            attachment: {
-              key: attachmentCopyKey,
-              description: `this is MY file with key ${attachmentKey}`,
-            },
-            resource: {
-              href: resourceCopyHref,
-            },
-          },
-        ];
-        const copyAttResult = await httpClient.post({
-          path: `${type}/attachments/copy`,
-          body: copyAttBody,
-        });
-        assert.equal(copyAttResult.status, 200);
+
+        const FileToCopy =
+        [{
+          remotefileName: "profile1.png",
+          urlToCopy: attachmentDownloadUrl,
+          attachmentKey: attachmentCopyKey,
+          resourceHref: resourceCopyHref,
+        }];
+        await copyFilesAndCheck(httpClient, FileToCopy);
 
         const attachmentCopyUrl = `${type}/${resourceCopyKey}/attachments/${attachmentCopyKey}`;
         const attachmentCopyDownloadUrl = `${type}/${resourceCopyKey}/attachments/profile1.png`;
 
         const responseGetAtt2 = await httpClient.get({ path: attachmentCopyUrl });
         assert.equal(responseGetAtt2.status, 200);
-        assert.equal(
-          responseGetAtt2.body.description,
-          `this is MY file with key ${attachmentKey}`
-        ); // copy has description of orig!
 
         // Delete and verify the copied attachment
         await deleteAttachmentAndVerify(
@@ -905,13 +929,9 @@ exports = module.exports = function (httpClient, type) {
 
 // TODO: test rollback (delete of temp files) in case of error
 // TODO: check if mimetype is set as expected
-// TODO: check if callbacks are with one file or multiple depending on config
-// TODO: copy and file not found: error expected!
 
 // No testcase for customRouteForPreSignedUpload provided yet as it is not used
-// TODO: add test cases for handleMultipleUploadsTogether (used in content api; or adapt content-api to get plugin usage more uniform!)
 // TODO : test security??
-// TODO : more error cases?
 
 // TODO : Define resource with S3 and file storage to test both
 // TODO : When BLOB database storage is implemented, also add a resource on that with tests

@@ -27,11 +27,19 @@ const { v4: uuidv4 } = require("uuid");
  *    ignoreNotFound?: boolean,
  * } } TMultiPartSingleBodyForFileUploads
  *
- * @typedef { TMultiPartSingleBodyForFileUploads & { fileHref: string } } TBodyForFileCopy
+ * @typedef { TMultiPartSingleBodyForFileUploads & { fileHref: string, originalFilename?: string } } TBodyForFileCopy
  *
  * @typedef { TMultiPartSingleBodyForFileUploads & { fileObj: TFileObj } } TMultiPartSingleBodyForFileUploadsWithFileObj
  * 
  * @typedef { import("stream").Readable } TReadableStream
+ *
+ *
+ * The runAfterUpload functions expect the 'file' property in the file object to be an object.
+ * This is contrary to the upload object where the 'file' property is the filename. Therefore
+ * internally 'file' remains the filename and extra information is stored in the 'fileObj'
+ * property.
+ *  ==> Use another type for the after upload handler.
+ * @typedef { Omit<TMultiPartSingleBodyForFileUploads, 'file'> & { file: TFileObj }} TMultiPartSingleBodyForAfterUploadHandler
  */
 
 /**
@@ -105,7 +113,7 @@ function getSafeFilename(filename) {
  * } } TSri4NodeAttachmentUtilsConfig
  *
  * @typedef { (tx: IDatabase, sriRequest: TSriRequest,
- *        att: TMultiPartSingleBodyForFileUploadsWithFileObj | Array<TMultiPartSingleBodyForFileUploadsWithFileObj>) => void } TRunAfterUploadFun
+ *        att: TMultiPartSingleBodyForAfterUploadHandler | Array<TMultiPartSingleBodyForAfterUploadHandler>) => void } TRunAfterUploadFun
  * @typedef { ( tx:any, sriRequest: TSriRequest, key: string, attachmentKey: string ) => Promise<{
  *        $$meta: {
  *          created: string,
@@ -125,11 +133,11 @@ function getSafeFilename(filename) {
  * @typedef { {
  *    customRouteForUpload: (
  *      runAfterUpload: TRunAfterUploadFun,
- *      getResourceForCopy: TGetResourceForCopyFun,
+ *      getResourceForCopy?: TGetResourceForCopyFun,
  *    ) => TCustomRoute,
  *    customRouteForUploadCopy: (
  *      runAfterUpload: TRunAfterUploadFun,
- *      getResourceForCopy: TGetResourceForCopyFun,
+ *      getResourceForCopy?: TGetResourceForCopyFun,
  *    ) => TCustomRoute,
  *    customRouteForPreSignedUpload: () => TCustomRoute,
  *    customRouteForDownload: () => TCustomRoute,
@@ -732,12 +740,14 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       const toCopyWithFileObj = toCopy.map((body) => {
         const resourceHref = getResourceHrefByAttachmentHref(body.fileHref);
         resources.add(resourceHref);
-        const filename = body.file; //body.fileHref.split("/attachments/").pop();
+        const filename = body.file;
         return {
           ...body,
+          originalFilename: undefined,
           fileObj: {
             tmpFileName: getTmpFilename(filename),
             filename,
+            originalFilename: body.originalFilename,
             mimetype: mime.contentType(filename),
           },
         };
@@ -1089,11 +1099,19 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       sriRequest.logDebug(logChannel, JSON.stringify(json, null, 2));
       sriRequest.logDebug(logChannel, ex);
     }
+    // The runAfterUpload functions expect the 'file' property in the file object to be an object.
+    // This is contrary to the upload object where the 'file' property is the filename. Therefore
+    // internally 'file' remains the filename and extra information is stored in the 'fileObj'
+    // property.
+    // ==> To keep the external interface the same for now, we need to transform the
+    // file information object.
+    /** @typedef {Array<TMultiPartSingleBodyForAfterUploadHandler>} */
+    const fileArrayWithFileObjForUploadHandler = fileArrayWithFileObj.map(e => ({...e, file: e.fileObj}));
     if (!fullPluginConfig.handleMultipleUploadsTogether) {
       if (fullPluginConfig.uploadInSequence) {
         // For example Persons Api which uses an sri4node as a proxy for its attachments files
         // should be sequentially uploaded
-        for (const file of fileArrayWithFileObj) {
+        for (const file of fileArrayWithFileObjForUploadHandler) {
           // eslint-disable-next-line no-await-in-loop
           try {
             await runAfterUpload(sriRequest.dbT, sriRequest, file);
@@ -1104,7 +1122,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           debug("handleFile success");
         }
       } else {
-        const uploadPromises = fileArrayWithFileObj.map((file) =>
+        const uploadPromises = fileArrayWithFileObjForUploadHandler.map((file) =>
           (async () => {
             try {
               await runAfterUpload(sriRequest.dbT, sriRequest, file);
@@ -1119,10 +1137,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       }
     } else {
       try {
-        await runAfterUpload(sriRequest.dbT, sriRequest, fileArrayWithFileObj);
+        await runAfterUpload(sriRequest.dbT, sriRequest, fileArrayWithFileObjForUploadHandler);
         debug("handleFile success");
       } catch (ex) {
-        logException(ex, fileArrayWithFileObj);
+        logException(ex, fileArrayWithFileObjForUploadHandler);
         throw ex;
       }
     }
@@ -1168,6 +1186,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     return bodyJsonArray.map((b) => ({
       ...b,
       file: b.file ? getSafeFilename(b.file) : undefined,
+      originalFilename: b.file,
       attachment: {
         ...b.attachment,
         name: b.attachment.name
@@ -1423,10 +1442,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
           validateUploadForCopyBody(bodyJsonArray, sriRequest);
 
+          const safeBodyJsonArray = await convertFilenamesInAttachmentsBodyToSafeFilenames(bodyJsonArray)
+
           copiedAttachmentsWithFileObj = await copyAttachments(
             tx,
             sriRequest,
-            bodyJsonArray,
+            safeBodyJsonArray,
             getResourceForCopy
           );
 
@@ -1435,7 +1456,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           await applyRunAfterUploadFun(fullPluginConfig, sriRequest, runAfterUpload, copiedAttachmentsWithFileObj);
 
           // now that we validated the json body resource requirement, we can finally check security
-          await checkSecurity(tx, sriRequest, bodyJsonArray, "create");
+          await checkSecurity(tx, sriRequest, safeBodyJsonArray, "create");
 
           /// all files are now uploaded into their TMP versions.
         } catch (err) {
