@@ -390,6 +390,37 @@ const checkStoreAttachment = (file) => {
       });
     }
   })
+
+  if (file.resource === null || typeof file.resource !== 'object') {
+    throw new SriError({
+      status: 500,
+      errors: [
+        {
+          code: "file.resource.is.not.an.object",
+          type: "ERROR",
+          message: `expected resource.attachment to be an object`,
+        },
+      ],
+    });
+  }
+  const expectedResourceProperties = [
+    'href',
+    'key',
+  ]
+  expectedResourceProperties.forEach(prop => {
+    if (file.resource[prop] === undefined) {
+      throw new SriError({
+        status: 500,
+        errors: [
+          {
+            code: "file.resource.is.missing.expected.property",
+            type: "ERROR",
+            message: `expected file.attachment object is missing property ${prop}`,
+          },
+        ],
+      });
+    }
+  })
 }
 
 

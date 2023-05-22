@@ -1,5 +1,6 @@
 const pEvent = require("p-event");
 const S3 = require("@aws-sdk/client-s3");
+const { Upload } = require("@aws-sdk/lib-storage");
 // const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
 const S3PresignedPost = require("@aws-sdk/s3-presigned-post");
 const mime = require("mime-types");
@@ -545,7 +546,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    *
    * @param {import('stream').Readable} fileStream
    * @param {string} tmpFileName
-   * @returns {Promise<S3.PutObjectCommandOutput>}
+   * @returns {Promise<import("@aws-sdk/client-s3").CompleteMultipartUploadCommandOutput | import("@aws-sdk/client-s3").AbortMultipartUploadCommandOutput>}
    */
   async function handleFileUpload(fileStream, tmpFileName) {
     const awss3 = getAWSS3Client();
@@ -558,7 +559,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       Body: fileStream,
     }; // , Metadata: { "attachmentkey": fileWithJson.attachment.key }
 
-    return await awss3.send(new S3.PutObjectCommand(params));
+    return await new Upload({ client: awss3, params}).done();
   }
 
   /**
@@ -1106,8 +1107,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     // property.
     // ==> To keep the external interface the same for now, we need to transform the
     // file information object.
+    // The old interface also used to pass file.resource.key. Also add this for backwards compability.
     /** @typedef {Array<TMultiPartSingleBodyForAfterUploadHandler>} */
-    const fileArrayWithFileObjForUploadHandler = fileArrayWithFileObj.map(e => ({...e, file: e.fileObj}));
+    const fileArrayWithFileObjForUploadHandler = fileArrayWithFileObj
+                  .map(e => ({...e, file: e.fileObj, resource: { ...e.resource, key: hrefToKey(e.resource.href) } }));
     if (!fullPluginConfig.handleMultipleUploadsTogether) {
       if (fullPluginConfig.uploadInSequence) {
         // For example Persons Api which uses an sri4node as a proxy for its attachments files
