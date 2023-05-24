@@ -27,7 +27,8 @@ services:
           # cfr. https://docs.localstack.cloud/getting-started/faq/#why-cant-my-other-docker-containers-reach-localstack
           - localhost.localstack.cloud # also see environment.HOSTNAME_EXTERNAL !
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
   ### the next service is not needed since localstack already contains aws and awslocal CLI
   # awscli:
   #   build:
@@ -49,3 +50,11 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - ./docker-postgres-initdb:/docker-entrypoint-initdb.d
+    # this healthcheck checks if the host is listening on port 5432 (1538 in hex)
+    # (netstat etc are not available so it has to be done by checking /proc/net/tcp)
+    # This should work because "the temporary daemon started for these initialization scripts
+    # listens only on the Unix socket" (as stated on https://registry.hub.docker.com/_/postgres/)
+    healthcheck:
+      test: [ "CMD", "grep", ":1538", "/proc/net/tcp" ]
+      interval: 2500ms
+      retries: 30
