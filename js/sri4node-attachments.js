@@ -742,7 +742,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       const toCopyWithFileObj = toCopy.map((body) => {
         const resourceHref = getResourceHrefByAttachmentHref(body.fileHref);
         resources.add(resourceHref);
-        const filename = body.file;
+        // if body.file is not present, take the filename of the attachment we are copying
+        const filename = body.file !== undefined ? body.file : body.fileHref.split('/').pop();
         return {
           ...body,
           originalFilename: undefined,

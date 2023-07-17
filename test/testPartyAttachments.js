@@ -875,6 +875,93 @@ exports = module.exports = function (httpClient, type) {
         assert.equal(responseGetCopyAtt2.status, 200);
       });
 
+      it("copy attachments should work without 'file' property", async () => {
+        const body = {
+          type: "person",
+          name: "test user",
+          status: "active",
+        };
+        const resourceKey = uuid.v4();
+        const resourceHref = type + "/" + resourceKey;
+        const attachmentKey1 = uuid.v4();
+        const attachmentKey2 = uuid.v4();
+        const attachmentUrl1 =
+          type + "/" + resourceKey + "/attachments/profile1.png";
+        const attachmentUrl2 =
+          type + "/" + resourceKey + "/attachments/profile2.png";
+
+        const response = await httpClient.put({ path: resourceHref, body });
+        assert.equal(response.status, 201);
+
+        debug("PUTting the profile images as attachments");
+        const filesToPut = [
+          {
+            remotefileName: "profile1.png",
+            localFilename: "test/images/orange-boy-icon.png",
+            attachmentKey: attachmentKey1,
+            resourceHref,
+          },
+          {
+            remotefileName: "profile2.png",
+            localFilename: "test/images/little-boy-white.png",
+            attachmentKey: attachmentKey2,
+            resourceHref,
+          },
+        ];
+        await uploadFilesAndCheck(httpClient, filesToPut);
+
+        // Copy the resource
+        const resourceCopyKey = uuid.v4();
+        const resourceCopyHref = type + "/" + resourceCopyKey;
+        const copyResponse = await httpClient.put({ path: resourceCopyHref, body });
+        assert.equal(copyResponse.status, 201);
+
+        // Copy the attachments
+        const attachmentCopyKey1 = uuid.v4();
+        const attachmentCopyKey2 = uuid.v4();
+
+        const copyAttBody = [
+          {
+            fileHref: attachmentUrl1,
+            attachment: {
+              key: attachmentCopyKey1,
+              description: `this is MY file with key ${attachmentKey1}`,
+            },
+            resource: {
+              href: resourceCopyHref,
+            },
+          },
+          {
+            fileHref: attachmentUrl2,
+            attachment: {
+              key: attachmentCopyKey2,
+              description: `this is MY file with key ${attachmentKey1}`,
+            },
+            resource: {
+              href: resourceCopyHref,
+            },
+          },
+        ];
+
+        const copyAttResult = await httpClient.post({
+          path: `${type}/attachments/copy`,
+          body: copyAttBody,
+        });
+        assert.equal(copyAttResult.status, 200);
+
+        // verify if the copied attachments are present
+        const attachmentCopyUrl1 =
+          type + "/" + resourceCopyKey + "/attachments/profile1.png";
+        const attachmentCopyUrl2 =
+          type + "/" + resourceCopyKey + "/attachments/profile2.png";
+
+        const responseGetCopyAtt1 = await httpClient.get({ path: attachmentCopyUrl1 });
+        assert.equal(responseGetCopyAtt1.status, 200);
+
+        const responseGetCopyAtt2 = await httpClient.get({ path: attachmentCopyUrl2 });
+        assert.equal(responseGetCopyAtt2.status, 200);
+      });
+
       it("copy attachments without fileHref should result in proper error", async () => {
         const attachmentKey1 = uuid.v4();
         const resourceCopyKey = uuid.v4();
