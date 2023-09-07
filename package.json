@@ -1,14 +1,12 @@
 {
   "name": "sri4node-attachments",
-  "version": "2.0.27",
+  "version": "2.3.0",
   "description": "A standard implementation to support attachments on sri4node resources.",
   "main": "js/sri4node-attachments.js",
   "scripts": {
     "pretest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml down --volumes --rmi=local --remove-orphans; DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml up --wait && sleep 3 && docker compose -f ./test/docker-compose.yml exec localstack  awslocal s3api create-bucket --bucket tests3bucket",
     "test": "mocha --timeout 500000 test/tests.js",
     "posttest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml down --volumes --rmi=local --remove-orphans",
-    "test-dev": "env $(cat .env) mocha --debug-brk",
-    "createdb": "./createdb.sh",
     "lint": "eslint js test",
     "prettier:check": "npx prettier --check .",
     "prettier:fix": "npx prettier --write ."
@@ -25,7 +23,6 @@
   "devDependencies": {
     "@types/busboy": "^1.5.0",
     "@types/mocha": "^10.0.1",
-    "@types/needle": "^3.2.0",
     "await-sleep": "^0.0.1",
     "eslint": "^8.30.0",
     "eslint-config-prettier": "^8.7.0",
@@ -37,7 +34,7 @@
     "prettier": "^2.8.4",
     "rewire": "^6.0.0",
     "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.20",
-    "undici": "^5.22.1"
+    "undici": "^5.23.0"
   },
   "repository": {
     "type": "git",

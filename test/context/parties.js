@@ -3,9 +3,10 @@
  * @param {import("sri4node")} sri4node
  * @param { import("../../js/sri4node-attachments").TSri4NodeAttachmentUtils} attachments
  * @param {string} type
+ * @param {*} customStoreAttachment optional argument to provide a custom store function for the attachments
  * @returns {import("sri4node").TResourceDefinition}
  */
-module.exports = function (sri4node, attachments, type, customStoreAttachment = undefined) {
+module.exports = function (sri4node, attachments, type, customStoreAttachment) {
   const $m = sri4node.mapUtils;
   const $s = sri4node.schemaUtils;
   const $q = sri4node.queryUtils;
@@ -14,15 +15,20 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment = 
 
   /**
    * Store attachment data in a local object for testing
-   * @param {*} file
+   * @param { import("../../js/sri4node-attachments").TMultiPartSingleBodyForAfterUploadHandler
+   *          | Array<import("../../js/sri4node-attachments").TMultiPartSingleBodyForAfterUploadHandler>} file
    */
   function storeAttachment(file) {
-    const resourceKey = file.resource.href.split("/").pop();
-    const attachmentKey = file.attachment.key;
-    if (resourceMap[resourceKey] === undefined) {
-      resourceMap[resourceKey] = {};
+    if (Array.isArray(file)) {
+      file.forEach(f => storeAttachment(f));
+    } else {
+      const resourceKey = file.resource.href.split("/").pop();
+      const attachmentKey = file.attachment.key;
+      if (resourceMap[resourceKey] === undefined) {
+        resourceMap[resourceKey] = {};
+      }
+      resourceMap[resourceKey][attachmentKey] = file;
     }
-    resourceMap[resourceKey][attachmentKey] = file;
   }
 
   /**
@@ -37,7 +43,7 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment = 
         modified: nowString,
         permalink: `${type}/${resourceKey}/attachments/${attachmentKey}`,
       },
-      href: `${type}/${resourceKey}/attachments/${attFile.file}`,
+      href: `${type}/${resourceKey}/attachments/${attachmentKey}`,
       key: attFile.attachment.key,
       name: attFile.file,
       description: attFile.attachment.description,
@@ -158,12 +164,18 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment = 
     customRoutes: [
       attachments.customRouteForUpload(
         async function (_tx, _sriRequest, file) {
-          customStoreAttachment ? customStoreAttachment(file) : storeAttachment(file);
+          if (customStoreAttachment) {
+            customStoreAttachment(file);
+          }
+          storeAttachment(file);
         },
       ),
       attachments.customRouteForUploadCopy(
         async function (_tx, _sriRequest, file) {
-          customStoreAttachment ? customStoreAttachment(file) : storeAttachment(file);
+          if (customStoreAttachment) {
+            customStoreAttachment(file);
+          }
+          storeAttachment(file);
         },
       ),
       attachments.customRouteForDownload(),

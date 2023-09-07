@@ -14,7 +14,6 @@ const FormData = require('form-data');
  * @property {string} path
  * @property {*} [body] - TODO: restrict
  * @property {boolean} [streaming]
- * @property {string} [auth]
  * @property {THttpHeaders} [headers]
  */
 
@@ -35,14 +34,6 @@ const FormData = require('form-data');
  * @property {(req: THttpRequest) => Promise<THttpResponse>} patch
  */
 
-/**
- * @param {string} user
- * @param {string} pw
- * @returns {string}
- */
-const makeBasicAuthHeader = (user, pw) => {
-  return `Basic ${Buffer.from(`${user}:${pw}`).toString('base64')}`;
-};
 
 /**
  * @param {THttpMethod} method
@@ -53,9 +44,6 @@ const makeBasicAuthHeader = (user, pw) => {
 const handleHttpRequest = async (method, req, undiciClient) => {
   const reqHeaders = {
     'content-type': 'application/json; charset=utf-8',
-    ...(req.auth
-      ? { authorization: makeBasicAuthHeader(`${req.auth}@email.be`, 'pwd') }
-      : {}),
     ...req.headers,
   };
 
@@ -77,8 +65,8 @@ const handleHttpRequest = async (method, req, undiciClient) => {
       body: req.streaming
         ? body
         : headers['content-type'] === 'application/json; charset=utf-8'
-        ? await body.json()
-        : await body.text(),
+          ? await body.json()
+          : await body.text(),
     };
   } catch (err) {
     console.log('Http request FAILED:');
