@@ -936,3 +936,4 @@ exports = module.exports = function (httpClient, type) {
 // TODO : When BLOB database storage is implemented, also add a resource on that with tests
 // TODO : Implement + check after & before function (with database access) on GET, PUT and DELETE.
 // TODO : add test for filename with special characters (check originalFilename and filename).
+// TODO : add testcase uploading multiple attachments with a failure during the last one -> everything should be rolled (tmp files removed)

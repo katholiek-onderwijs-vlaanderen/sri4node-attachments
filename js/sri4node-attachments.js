@@ -379,25 +379,15 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   async function deleteFromS3(filenames) {
     const awss3 = getAWSS3Client();
 
-    // const objects = filenames.map((e) => ({ Key: e }));
-    // const params = {
-    //   Bucket: fullPluginConfig.s3bucket,
-    //   Delete: {
-    //     Objects: objects,
-    //   },
-    // };
-    // const reponse = await awss3.send(new S3.DeleteObjectsCommand(params));
-
-    // delete one-by-one because localstack seems to be unable to handle DeleteObjectsCommand with latest aws sdk
-    for (const fn of filenames) {
-      const response = await awss3.send(
-        new S3.DeleteObjectCommand({
-          Bucket: fullPluginConfig.s3bucket,
-          Key: fn,
-        })
-      );
-      console.log(response);
-    }
+    const objects = filenames.map((e) => ({ Key: e }));
+    const params = {
+      Bucket: fullPluginConfig.s3bucket,
+      Delete: {
+        Objects: objects,
+      },
+    };
+    const response = await awss3.send(new S3.DeleteObjectsCommand(params));
+    console.log(response);
   }
 
   /**
