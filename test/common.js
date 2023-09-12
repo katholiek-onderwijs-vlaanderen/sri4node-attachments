@@ -195,12 +195,12 @@ const createUploadBody = (fileDetails) => {
  * ```
  *
  * @param {THttpClient} httpClient
- * @param {string} resourceUrl is the url of the resource for which you want to put an attachment
- *                              for example https://localhost:5000/partiesS3/<some-guid>
+ * @param {string} resourcePath is the path of the resource for which you want to put an attachment
+ *                              for example /partiesS3/<some-guid>
  * @param {Array<TFileToUpload | TFileToCopy>} fileDetails
  * @returns {Promise<THttpResponse>} a http response
  */
-async function doPutFiles(httpClient, resourceUrl, fileDetails) {
+async function doPutFiles(httpClient, resourcePath, fileDetails) {
   const body = createUploadBody(fileDetails);
   const formData = new FormData();
   formData.append('body', JSON.stringify(body));
@@ -217,7 +217,7 @@ async function doPutFiles(httpClient, resourceUrl, fileDetails) {
   // -> process the response streaming to be able to catch errors (see getStreamAsBuffer function
   //    for more information).
   const response = await httpClient.post({
-    path: resourceUrl + "/attachments",
+    path: resourcePath + "/attachments",
     headers: formData.getHeaders(), // needed to make it a multipart request !
     body: formData,
     streaming: true, // ask for streaming response
