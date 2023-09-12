@@ -273,10 +273,6 @@ async function checkStreamEqual(s1, s2) {
   const b1 = await getStreamAsBuffer(s1);
   const b2 = await getStreamAsBuffer(s2);
   if (b1.byteLength !== b2.byteLength) {
-    console.log('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-    console.log(b1.toString());
-    console.log('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-
     assert.fail(
       `Streams are not equal. They have different lengths: ${b1.byteLength} != ${b2.byteLength}`
     );
@@ -284,7 +280,7 @@ async function checkStreamEqual(s1, s2) {
   let index = 0;
   const it2 = b2[Symbol.iterator]();
   for (const v1 of b1) {
-    const { value: v2 } = await it2.next();
+    const { value: v2 } = it2.next();
     if (v1 !== v2) {
       assert.fail(
         `Streams are not equal. At position ${index} ${v1.toString()} != ${v2.toString()}`
