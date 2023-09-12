@@ -209,10 +209,7 @@ async function doPutFiles(httpClient, resourceUrl, fileDetails) {
     .forEach((f) => {
       if ('localFilename' in f) {
         const { remotefileName, localFilename, attachmentKey } = f;
-        formData.append(attachmentKey, fs.createReadStream(localFilename), {
-          filename: remotefileName,
-          contentType: 'image/png',
-        });
+        formData.append(attachmentKey, fs.createReadStream(localFilename), remotefileName );
       }
     });
 
