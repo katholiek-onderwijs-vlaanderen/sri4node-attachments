@@ -1,8 +1,0 @@
-#!/bin/bash
-
-branchName=$(git branch --show-current)
-firstLine=$(head -n1 $1)
-
-if [ -z "$firstLine"  ] ;then #Check that this is not an amend by checking that the first line is empty
-    sed -i "1s@^@\n\n$branchName@" $1 #Insert branch name at the end of the commit message file
-fi

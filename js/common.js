@@ -1,35 +1,20 @@
-exports = module.exports = {
-  debug: function (x) {
-    'use strict';
-    var verbose = process.env.LOG_DEBUG ? true : false // eslint-disable-line
+module.exports = {
+  debug: function debug(x) {
+    const verbose = process.env.LOG_DEBUG ? true : false;
     if (verbose) {
-      console.log(x); // eslint-disable-line
+      console.log(x);
     }
   },
 
-  info: function (x) {
-    'use strict';
-    console.log(x); // eslint-disable-line
+  info: function info(x) {
+    console.log(x);
   },
 
   warn: function (x) {
-    'use strict';
-    console.warn(x); // eslint-disable-line
+    console.warn(x);
   },
 
   error: function (x) {
-    'use strict';
-    console.error(x); // eslint-disable-line
+    console.error(x);
   },
-
-  /* Merge all direct properties of object 'source' into object 'target'. */
-  objectMerge: function (target, source) {
-    'use strict';
-    var key;
-    for (key in source) {
-      if (source.hasOwnProperty(key)) {
-        target[key] = source[key];
-      }
-    }
-  }
 };
