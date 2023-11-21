@@ -57,7 +57,7 @@ const getAttJson = async function (tx, sriRequest, resourceKey, attachmentKey) {
 ...
 customRoutes: [
   attachments.customRouteForUpload(uploadFile),  //uploadFile is a function that will be called ONCE FOR EACH FILE that has been uploaded on s3.
-  attachments.customRouteForDownload(),
+  attachments.customRouteForDownload(checkDownload), //checkDownload is a function that is called to allow the client to check and abort the download, like in cases where it belongs to a deleted node
   attachments.customRouteForDelete(getFileName, deleteFile),  //getFileName is a function that is called to retrieve the filename from the database. deleteFile is a function that will be called once the file is deleted on s3
   attachments.customRouteForGet(getAttJson) //getAttJson is a function that gets the JSON of an attachment resource.
 ]
@@ -215,7 +215,7 @@ You can add custom handlers in the routes that are handling your attachments :
 ...
 customroutes: [
   attachments.customRouteForUpload(uploadFile),  //uploadFile is a function that will be called ONCE FOR EACH FILE that has been uploaded on s3.
-  attachments.customRouteForDownload(),
+  attachments.customRouteForDownload(checkDownload), //checkDownload is a function that is called to allow the client to check and abort the download, like in cases where it belongs to a deleted node
   attachments.customRouteForDelete(getFileName, deleteFile),  //getFileName is a function that is called to retreive the filename from the database. deleteFile is a function that will be called once the file is deleted on s3
   attachments.customRouteForGet(getAttJson) //getAttJson is a function that gets the JSON of an attachment resource.
 ]

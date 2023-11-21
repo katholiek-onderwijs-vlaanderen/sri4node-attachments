@@ -127,6 +127,7 @@ function getSafeFilename(filename) {
  *        contentType: string;
  *        description: string;
  *      }> } TGetAttJsonFun
+ * @typedef { ( tx:any, sriRequest: TSriRequest, key: string, filename: string ) => Promise<void> } TCheckDownloadFun 
  * @typedef { (tx: IDatabase, sriRequest: TSriRequest, resourceKey: string, attachmentKey: string) => Promise<string> } TGetFileNameHandlerFun
  * @typedef { (tx: IDatabase, sriRequest: TSriRequest, resourceKey: string, attachmentKey: string) => Promise<void> } TAfterHandlerFun
  * @typedef { (href: string) => string } TGetResourceForCopyFun
@@ -141,7 +142,9 @@ function getSafeFilename(filename) {
  *      getResourceForCopy?: TGetResourceForCopyFun,
  *    ) => TCustomRoute,
  *    customRouteForPreSignedUpload: () => TCustomRoute,
- *    customRouteForDownload: () => TCustomRoute,
+ *    customRouteForDownload: (
+ *      checkDownload?: TCheckDownloadFun
+ *    ) => TCustomRoute,
  *    customRouteForDelete: (
  *      getFileNameHandler: TGetFileNameHandlerFun,
  *      afterHandler: TAfterHandlerFun
@@ -1491,9 +1494,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * sriConfig.resources.*.customRoutes in order to add a GET
    * /resource/attachments/<filename> route to download an attachment.
    *
+   * @param { TCheckDownloadFun } checkDownload
    * @returns {TCustomRoute}
    */
-  function customRouteForDownload() {
+  function customRouteForDownload(checkDownload) {
     return {
       routePostfix: "/:key/attachments/:filename([^/]*.[A-Za-z0-9]{1,})",
       httpMethods: ["GET"],
@@ -1511,6 +1515,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       ) => {
         await checkSecurity(tx, sriRequest, null, "read");
         sriRequest.logDebug(logChannel, sriRequest.params.filename);
+        if(checkDownload) await checkDownload(tx, sriRequest, sriRequest.params.key, sriRequest.params.filename);
 
         let contentType = "application/octet-stream";
 
