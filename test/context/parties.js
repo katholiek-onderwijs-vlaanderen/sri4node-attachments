@@ -4,9 +4,10 @@
  * @param { import("../../js/sri4node-attachments").TSri4NodeAttachmentUtils} attachments
  * @param {string} type
  * @param {*} customStoreAttachment optional argument to provide a custom store function for the attachments
+ * @param {*} customCheckDownload optional argument to provide a custom check function for the downloads
  * @returns {import("sri4node").TResourceDefinition}
  */
-module.exports = function (sri4node, attachments, type, customStoreAttachment) {
+module.exports = function (sri4node, attachments, type, customStoreAttachment, customCheckDownload) {
   const $m = sri4node.mapUtils;
   const $s = sri4node.schemaUtils;
   const $q = sri4node.queryUtils;
@@ -178,7 +179,7 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment) {
           storeAttachment(file);
         },
       ),
-      attachments.customRouteForDownload(),
+      attachments.customRouteForDownload(customCheckDownload),
       attachments.customRouteForDelete(
         async (_tx, _sriRequest, resourceKey, attachmentKey) =>
           resourceMap[resourceKey][attachmentKey].fileObj.filename,

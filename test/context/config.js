@@ -7,7 +7,7 @@ const partiesFactory = require("./parties");
  *
  * @returns { Promise<import('sri4node').TSriConfig> }
  */
-module.exports = async function (handleMultipleUploadsTogether = false, uploadInSequence = true, customStoreAttachment = undefined) {
+module.exports = async function (handleMultipleUploadsTogether = false, uploadInSequence = true, customStoreAttachment = undefined, customCheckDownload = undefined) {
   const attachmentUtilsForS3 = await sri4nodeAttachmentUtilsFactory(
     {
       endpoint: "http://localhost:4566/",
@@ -42,7 +42,7 @@ module.exports = async function (handleMultipleUploadsTogether = false, uploadIn
       ],
     },
     resources: [
-      partiesFactory(sri4node, attachmentUtilsForS3, "/partiesS3", customStoreAttachment),
+      partiesFactory(sri4node, attachmentUtilsForS3, "/partiesS3", customStoreAttachment, customCheckDownload),
       // Is storing files locally still supported?
       // partiesFactory(sri4node, attachmentUtilsForLocalFolder, '/partiesFolder'),
     ],

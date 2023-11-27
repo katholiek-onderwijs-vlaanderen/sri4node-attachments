@@ -2,6 +2,8 @@
 const expressFactory = require("express");
 const sri4node = require("sri4node");
 const sleep = require('await-sleep');
+const uuid = require("uuid");
+const assert = require("assert");
 
 const sri4nodeConfigFactory = require("./context/config");
 
@@ -23,9 +25,10 @@ let serverStarted = false;
  * @param {boolean} handleMultipleUploadsTogether 
  * @param {boolean} uploadInSequence 
  * @param {*} customStoreAttachment 
+ * @param {*} customCheckDownload
  * @returns 
  */
-const initServer = async (id, handleMultipleUploadsTogether, uploadInSequence, customStoreAttachment) => {
+const initServer = async (id, handleMultipleUploadsTogether, uploadInSequence, customStoreAttachment, customCheckDownload) => {
   try {
     const app = expressFactory();
     if (serverStarted) {
@@ -37,7 +40,7 @@ const initServer = async (id, handleMultipleUploadsTogether, uploadInSequence, c
       await sleep(5000);
     }
 
-    const sriConfig = await sri4nodeConfigFactory(handleMultipleUploadsTogether, uploadInSequence, customStoreAttachment);
+    const sriConfig = await sri4nodeConfigFactory(handleMultipleUploadsTogether, uploadInSequence, customStoreAttachment, customCheckDownload);
     sriConfig.description = `config of sri4node-attachments(${id})`;
     const sri4nodeServerInstance = await sri4node.configure(app, sriConfig);
     app.set("port", port);
@@ -155,4 +158,54 @@ describe("sri4node-attachments(3) : ", () => {
   });
 
   runTests(httpClient);
+});
+
+describe("sri4node-attachments custom checkParentDeleted(4) : ", () => {
+  /** @type {import("sri4node").TSriServerInstance} */
+  let sri4nodeServerInstance;
+  let server;
+
+  let receivedTx;
+  let receivedFilename;
+  let receivedKey;
+
+  before(async () => {
+    const handleMultipleUploadsTogether = false;
+    const uploadInSequence = false;
+    const checkParentDeleted = async (tx, sriRequest, key, filename) => {
+      receivedTx = tx;
+      receivedKey = key;
+      receivedFilename = filename;
+      throw new sriRequest.SriError({
+        status: 410,
+        errors: [
+          {
+            code: 'file.was.deleted',
+            type: 'ERROR',
+            message: 'file was deleted',
+          },
+        ],
+      });
+    };
+    ({ sri4nodeServerInstance, server } = await initServer('4', handleMultipleUploadsTogether, uploadInSequence, undefined, checkParentDeleted ));
+  });
+
+  it("should be able to abort the request ", async () => {
+    const resourceKey = uuid.v4();
+    const filename = 'test.png';
+    const response = await httpClient.get({ path: `/partiesS3/${resourceKey}/attachments/${filename}` });
+    console.log(`/content/${resourceKey}/attachments/${filename}`);
+    assert.equal(response.status, 410);
+    assert.equal(response.body.errors[0].code, 'file.was.deleted');
+    assert.equal(receivedKey, resourceKey);
+    assert.equal(receivedFilename, filename);
+    assert.equal(typeof receivedTx.oneOrNone, 'function');
+  });
+
+  after(async () => {
+    // enable this to keep the server running for inspection
+    // await new Promise(() => {});
+    await closeServer(server, sri4nodeServerInstance);
+  });
+
 });
