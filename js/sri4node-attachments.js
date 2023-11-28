@@ -1515,7 +1515,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       ) => {
         await checkSecurity(tx, sriRequest, null, "read");
         sriRequest.logDebug(logChannel, sriRequest.params.filename);
-        if(checkDownload) await checkDownload(tx, sriRequest, sriRequest.params.key, sriRequest.params.filename);
+        if (checkDownload) await checkDownload(tx, sriRequest, sriRequest.params.key, sriRequest.params.filename);
 
         let contentType = "application/octet-stream";
 

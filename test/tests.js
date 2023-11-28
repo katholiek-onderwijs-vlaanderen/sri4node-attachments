@@ -16,6 +16,7 @@ const httpClientMod = require("./httpClient.js");
 const httpClient = httpClientMod.httpClientFactory(base);
 
 const { info, error } = require("../js/common");
+const { uploadFilesAndCheck, deleteAttachmentAndVerify } = require("./common");
 
 let serverStarted = false;
 
@@ -176,16 +177,18 @@ describe("sri4node-attachments custom checkParentDeleted(4) : ", () => {
       receivedTx = tx;
       receivedKey = key;
       receivedFilename = filename;
-      throw new sriRequest.SriError({
-        status: 410,
-        errors: [
-          {
-            code: 'file.was.deleted',
-            type: 'ERROR',
-            message: 'file was deleted',
-          },
-        ],
-      });
+      if (sriRequest.query.simulateParentDeleted === 'true') {
+        throw new sriRequest.SriError({
+          status: 410,
+          errors: [
+            {
+              code: 'file.was.deleted',
+              type: 'ERROR',
+              message: 'file was deleted',
+            },
+          ],
+        });
+      }
     };
     ({ sri4nodeServerInstance, server } = await initServer('4', handleMultipleUploadsTogether, uploadInSequence, undefined, checkParentDeleted ));
   });
@@ -193,13 +196,53 @@ describe("sri4node-attachments custom checkParentDeleted(4) : ", () => {
   it("should be able to abort the request ", async () => {
     const resourceKey = uuid.v4();
     const filename = 'test.png';
-    const response = await httpClient.get({ path: `/partiesS3/${resourceKey}/attachments/${filename}` });
-    console.log(`/content/${resourceKey}/attachments/${filename}`);
+    const response = await httpClient.get({ path: `/partiesS3/${resourceKey}/attachments/${filename}?simulateParentDeleted=true` });
     assert.equal(response.status, 410);
     assert.equal(response.body.errors[0].code, 'file.was.deleted');
     assert.equal(receivedKey, resourceKey);
     assert.equal(receivedFilename, filename);
     assert.equal(typeof receivedTx.oneOrNone, 'function');
+  });
+
+  it("should download the file if checkParentDeleted does not throw", async () => {
+    const type = '/partiesS3';
+    const body = {
+      type: "person",
+      name: "test user",
+      status: "active",
+    };
+    const [resourceKey, attachmentKey ] = Array.from({ length: 2 }, () => uuid.v4());
+    const resourceHref = type + "/" + resourceKey;
+    const localFilename = "test/images/orange-boy-icon.png";
+    const attachmentUrl = `${type}/${resourceKey}/attachments/${attachmentKey}`;
+    const attachmentDownloadUrl =
+      type + "/" + resourceKey + "/attachments/profile.png";
+
+    const responsePut = await httpClient.put({ path: resourceHref, body });
+    assert.equal(responsePut.status, 201);
+
+    const filesToPut = [
+      {
+        remotefileName: "profile.png",
+        localFilename,
+        attachmentKey,
+        resourceHref,
+      },
+    ];
+    await uploadFilesAndCheck(httpClient, filesToPut);
+
+    const responseGet = await httpClient.get({ path: attachmentDownloadUrl});
+    assert.equal(responseGet.status, 200);
+    assert.equal(responseGet.headers['content-disposition'], 'inline; filename="profile.png"');
+
+    // Delete and verify the original attachment
+    await deleteAttachmentAndVerify(httpClient, attachmentUrl, attachmentDownloadUrl);
+  });
+
+  it("should return 404 if file doesn't exists and checkParentDeleted does not throw", async () => {
+    const resourceKey = uuid.v4();
+    const responseGet = await httpClient.get({ path: `/partiesS3/${resourceKey}/attachments/not_existing_file.png` });
+    assert.equal(responseGet.status, 404);
   });
 
   after(async () => {
