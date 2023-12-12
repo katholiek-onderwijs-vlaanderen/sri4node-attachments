@@ -33,12 +33,12 @@ module.exports = async function (handleMultipleUploadsTogether = false, uploadIn
     description: "",
     logdebug: {
       channels: [
-        "sri4node-attachments",
-        "trace",
-        "general",
-        "batch",
-        "db",
-        "sql",
+        // "sri4node-attachments",
+        // "trace",
+        // "general",
+        // "batch",
+        // "db",
+        // "sql",
       ],
     },
     resources: [
