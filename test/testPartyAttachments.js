@@ -924,7 +924,7 @@ exports = module.exports = function (httpClient, type) {
 
     });
 
-    describe.only("file-less attachment", function () {
+    describe("file-less attachment", function () {
       let putAttachmentsResponse;
       let partyPutResponse;
       let attachment;
