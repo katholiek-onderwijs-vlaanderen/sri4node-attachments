@@ -20,7 +20,7 @@ const { uploadFilesAndCheck, copyFilesAndCheck } = require("./common.js");
  * @param {*} file 
  */
 const checkStoreAttachment = (file) => {
-  if (file.file === null || typeof file.file !== 'object') {
+  if (file.file && typeof file.file !== 'object') {
     throw new SriError({
       status: 500,
       errors: [
@@ -41,7 +41,7 @@ const checkStoreAttachment = (file) => {
     'hash',
   ];
   expectedFileProperties.forEach(prop => {
-    if (file.file[prop] === undefined) {
+    if (file.file && file.file[prop] === undefined) {
       throw new SriError({
         status: 500,
         errors: [
@@ -146,7 +146,9 @@ function checkStoreAttachmentFactory(handleMultipleUploadsTogether, uploadInSequ
       throw new Error("checkStoreAttachmentsReceivedList must be an array, if uploadInSequence is true");
     }
     return (file) => {
-      checkStoreAttachmentsReceivedList.push(file.fileObj.filename.substring(0,8));
+      if (file.fileObj) {
+        checkStoreAttachmentsReceivedList.push(file.fileObj.filename.substring(0,8));
+      }
       checkStoreAttachment(file);
     };
   }

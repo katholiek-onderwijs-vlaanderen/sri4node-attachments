@@ -16,13 +16,15 @@ const getSafeFilename = sri4nodeAttachments.__get__('getSafeFilename');
  *  urlToCopy?: string,
  *  localFilename: string,
  *  attachmentKey: string,
- *  resourceHref: string
+ *  resourceHref: string,
+ *  attachment?: {description?: string; href?: string;}
  * } } TFileToUpload
  * @typedef { {
  *  remotefileName?: string,
  *  urlToCopy?: string,
  *  attachmentKey: string,
- *  resourceHref: string
+ *  resourceHref: string,
+ *  attachment?: {description?: string; href?: string;}
  * } } TFileToCopy
  * 
  * @typedef { import("./httpClient.js").THttpClient } THttpClient
@@ -83,14 +85,21 @@ const deleteAttachmentAndVerify = async (
  */
 const createUploadBody = (fileDetails) => {
   return fileDetails.map(
-    ({ remotefileName, attachmentKey, resourceHref, urlToCopy }) => ({
+    ({
+      remotefileName,
+      attachmentKey,
+      resourceHref,
+      urlToCopy,
+      attachment,
+    }) => ({
       file: remotefileName, // can be undefined in that case of copy (in this case the name of the original file is taken)
-      fileHref: urlToCopy,  // can be undefined, but if it's there, this is the url that should be copied
-                            // instead of uploading a local file
+      fileHref: urlToCopy, // can be undefined, but if it's there, this is the url that should be copied
+      // instead of uploading a local file
       attachment: {
         key: attachmentKey,
         description: `this is MY file with key ${attachmentKey}`,
         aCustomTestProperty: 1000,
+        ...attachment,
       },
       resource: {
         href: resourceHref,
