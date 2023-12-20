@@ -4,6 +4,7 @@ const { debug } = require("../js/common.js");
 const fs = require("fs");
 
 const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody } = require("./common.js");
+const { beforeEach } = require("mocha");
 
 exports = module.exports = function (httpClient, type) {
   describe(type, function () {
@@ -235,8 +236,8 @@ exports = module.exports = function (httpClient, type) {
         } catch (err) {
           catchedErr = err;
         }
-        assert.equal(catchedErr !== null, true, 'expected a http error')
-        assert.equal((catchedErr).err.code, 'UND_ERR_SOCKET', 'expected a connection reset error')
+        assert.equal(catchedErr !== null, true, 'expected a http error');
+        assert.equal((catchedErr).err.code, 'UND_ERR_SOCKET', 'expected a connection reset error');
 
         const partialBody = catchedErr.partialBody.toString();
         assert.equal(partialBody.includes('"status": 409'), true, 'expected status code 409 conflict in partial body');
@@ -921,6 +922,75 @@ exports = module.exports = function (httpClient, type) {
         assert.equal(copyAttResult2.body.errors[0].code, "file.already.exists");
       });
 
+    });
+
+    describe("file-less attachment", function () {
+      let putAttachmentsResponse;
+      let partyPutResponse;
+      let attachment;
+      let resourceHref;
+
+      beforeEach(async () => {
+        const body = {
+          type: "person",
+          name: "test user",
+          status: "active",
+        };
+        const [resourceKey, attachmentKey1] = Array.from({ length: 4 }, () =>
+          uuid.v4()
+        );
+        resourceHref = type + "/" + resourceKey;
+
+        partyPutResponse = await httpClient.put({ path: resourceHref, body });
+
+        debug("PUTting a text as attachment");
+        attachment = {
+          description:
+            "In publishing and graphic design, Lorem ipsum is a placeholder text commonly used to demonstrate the visual form of a document or a typeface without relying on meaningful content.",
+          title: "Lorem Ipsum",
+          myProperty: "myValue",
+        };
+
+        const filesToPut = [
+          {
+            attachmentKey: attachmentKey1,
+            attachment: attachment,
+            resourceHref,
+          },
+        ];
+
+        putAttachmentsResponse = await doPutFiles(httpClient, type, filesToPut);
+      });
+
+      it("should allow text-based attachments (without files) to be PUT and simply pass them through", async () => {
+        
+        assert.equal(partyPutResponse.status, 201);
+        assert.equal(putAttachmentsResponse.status, 200);
+
+        const responseGet = await httpClient.get({ path: resourceHref });
+        assert.equal(responseGet.status, 200);
+        assert.equal(responseGet.body.attachments.length, 1);
+
+        // check if all the properties are there with the correct values
+        Object.entries(attachment).forEach(([key, value]) => {
+          assert.equal(responseGet.body.attachments[0][key], value, `Mismatch in property ${key}`);
+        });
+      });
+
+      it("should allow text-based attachments (without files) to be DELETEd", async () => {
+        
+        assert.equal(partyPutResponse.status, 201);
+        assert.equal(putAttachmentsResponse.status, 200);
+
+        const responseGet = await httpClient.get({ path: resourceHref });
+
+        const response1 = await httpClient.delete({ path: responseGet.body.attachments[0].href });
+        assert.equal(response1.status, 204);
+
+        const responseGet2 = await httpClient.get({ path: resourceHref });
+        assert.equal(responseGet2.status, 200);
+        assert.equal(responseGet2.body.attachments.length, 0);
+      });
     });
   });
 };

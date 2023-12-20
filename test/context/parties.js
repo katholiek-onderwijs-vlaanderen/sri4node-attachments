@@ -39,6 +39,7 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment, c
   function attachmentJson(attFile, resourceKey, attachmentKey) {
     const nowString = new Date().toISOString();
     return {
+      ...attFile.attachment,
       $$meta: {
         created: nowString,
         modified: nowString,
@@ -47,8 +48,7 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment, c
       href: `${type}/${resourceKey}/attachments/${attachmentKey}`,
       key: attFile.attachment.key,
       name: attFile.file,
-      description: attFile.attachment.description,
-      contentType: attFile.fileObj.mimeType,
+      contentType: attFile.fileObj?.mimeType,
     };
   }
 
@@ -182,7 +182,7 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment, c
       attachments.customRouteForDownload(customCheckDownload),
       attachments.customRouteForDelete(
         async (_tx, _sriRequest, resourceKey, attachmentKey) =>
-          resourceMap[resourceKey][attachmentKey].fileObj.filename,
+          resourceMap[resourceKey][attachmentKey]?.fileObj?.filename,
         async (_tx, _sriRequest, resourceKey, attachmentKey) => {
           delete resourceMap[resourceKey][attachmentKey];
         }

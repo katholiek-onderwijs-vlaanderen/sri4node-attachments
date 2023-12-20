@@ -92,8 +92,30 @@ describe("Unit tests : ", () => {
 //   sri4node-attachments(2) :                  true                        true
 //   sri4node-attachments(3) :                  true                        false
 
-
+// Configuration with handleMultipleUploadsTogether=false and uploadInSequence=false
 describe("sri4node-attachments(1) : ", () => {
+  /** @type {import("sri4node").TSriServerInstance} */
+  let sri4nodeServerInstance;
+  let server;
+
+  before(async () => {
+    const handleMultipleUploadsTogether = false;
+    const uploadInSequence = false;
+    const customStoreAttachment = testPartyAttachmentsCheckStoreAttachmentMod.checkStoreAttachmentFactory(handleMultipleUploadsTogether, uploadInSequence);
+    ({ sri4nodeServerInstance, server } = await initServer('1', handleMultipleUploadsTogether, uploadInSequence, customStoreAttachment));
+  });
+
+  after(async () => {
+    // enable this to keep the server running for inspection
+    // await new Promise(() => {});
+    await closeServer(server, sri4nodeServerInstance);
+  });
+
+  runTests(httpClient);
+});
+
+// Configuration with handleMultipleUploadsTogether=false and uploadInSequence=true
+describe("sri4node-attachments(2) : ", () => {
   /** @type {import("sri4node").TSriServerInstance} */
   let sri4nodeServerInstance;
   let server;
@@ -101,10 +123,9 @@ describe("sri4node-attachments(1) : ", () => {
 
   before(async () => {
     const handleMultipleUploadsTogether = false;
-    const uploadInSequence = false; // uploadInSequence value does not matter in case of handleMultipleUploadsTogether=false
-                                    // (not relevant and thus not used in that code path)
+    const uploadInSequence = true;
     const customStoreAttachment = testPartyAttachmentsCheckStoreAttachmentMod.checkStoreAttachmentFactory(handleMultipleUploadsTogether, uploadInSequence, checkStoreAttachmentsReceivedList);
-    ({ sri4nodeServerInstance, server } = await initServer('1', handleMultipleUploadsTogether, uploadInSequence, customStoreAttachment));
+    ({ sri4nodeServerInstance, server } = await initServer('2', handleMultipleUploadsTogether, uploadInSequence, customStoreAttachment));
   });
 
   after(async () => {
@@ -117,29 +138,7 @@ describe("sri4node-attachments(1) : ", () => {
 });
 
 
-// Configuration with multiple uploads together
-describe("sri4node-attachments(2) : ", () => {
-  /** @type {import("sri4node").TSriServerInstance} */
-  let sri4nodeServerInstance;
-  let server;
-
-  before(async () => {
-    const handleMultipleUploadsTogether = true;
-    const uploadInSequence = true;
-    const customStoreAttachment = testPartyAttachmentsCheckStoreAttachmentMod.checkStoreAttachmentFactory(handleMultipleUploadsTogether, uploadInSequence);
-    ({ sri4nodeServerInstance, server } = await initServer('2', handleMultipleUploadsTogether, uploadInSequence, customStoreAttachment));
-  });
-
-  after(async () => {
-    // enable this to keep the server running for inspection
-    // await new Promise(() => {});
-    await closeServer(server, sri4nodeServerInstance);
-  });
-
-  runTests(httpClient);
-});
-
-// Configuration with multiple uploads together
+// Configuration with multiple uploads together (upload in sequence does noty matter in this case)
 describe("sri4node-attachments(3) : ", () => {
   /** @type {import("sri4node").TSriServerInstance} */
   let sri4nodeServerInstance;
@@ -147,7 +146,8 @@ describe("sri4node-attachments(3) : ", () => {
 
   before(async () => {
     const handleMultipleUploadsTogether = true;
-    const uploadInSequence = false;
+    const uploadInSequence = false; // uploadInSequence value does not matter in case of handleMultipleUploadsTogether=false
+                                    // (not relevant and thus not used in that code path)
     const customStoreAttachment = testPartyAttachmentsCheckStoreAttachmentMod.checkStoreAttachmentFactory(handleMultipleUploadsTogether, uploadInSequence);
     ({ sri4nodeServerInstance, server } = await initServer('3', handleMultipleUploadsTogether, uploadInSequence, customStoreAttachment));
   });
@@ -160,6 +160,7 @@ describe("sri4node-attachments(3) : ", () => {
 
   runTests(httpClient);
 });
+
 
 describe("sri4node-attachments custom checkParentDeleted(4) : ", () => {
   /** @type {import("sri4node").TSriServerInstance} */

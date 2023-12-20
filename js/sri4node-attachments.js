@@ -1296,6 +1296,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         let copiedAttachmentsWithFileObj = [];
         let uploadedAttachmentsWithFileObj = [];
         let allAttachmentsWithFileObj = [];
+        let allAttachmentsToHandle = [];
 
         try {
           const { attachmentsRcvd, fieldsRcvd } = await receiveFilesAndMetadataFromBusboyAndUploadToS3(sriRequest);
@@ -1309,6 +1310,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           validateUploadMultipartBody(bodyJsonArray, sriRequest);
 
           const safeBodyJsonArray = await convertFilenamesInAttachmentsBodyToSafeFilenames(bodyJsonArray);
+
+          const attachmentsWithoutFileOrCopy = safeBodyJsonArray.filter(
+            (e) => !e.file && !e.fileHref
+          );
 
           // copy attachments in case there are fileHrefs in the multipart
           const copiedAttachmentsWithFileObj = await copyAttachments(
@@ -1334,8 +1339,19 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
             ...copiedAttachmentsWithFileObj.map(addMimeType),
             ...uploadedAttachmentsWithFileObj.map(addMimeType)
           ];
+
+          allAttachmentsToHandle = [
+            ...allAttachmentsWithFileObj,
+            ...attachmentsWithoutFileOrCopy,
+          ];
+
           await checkAttachmentsFileExistence(allAttachmentsWithFileObj, sriRequest);
-          await applyRunAfterUploadFun(fullPluginConfig, sriRequest, runAfterUpload, allAttachmentsWithFileObj);
+          await applyRunAfterUploadFun(
+            fullPluginConfig,
+            sriRequest,
+            runAfterUpload,
+            allAttachmentsToHandle
+          );
 
           // now that we validated the json body resource requirement, we can finally check security
           await checkSecurity(tx, sriRequest, safeBodyJsonArray, "create");
@@ -1350,10 +1366,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         /// all went well, rename the files to their real names now.
         await renameAttachmentsToRealNames(allAttachmentsWithFileObj);
 
-        const response = allAttachmentsWithFileObj.map((file) => ({
-            status: 200,
-            href: `${file.resource.href}/attachments/${file.attachment.key}`,
-          }));
+        const response = allAttachmentsToHandle.map((file) => ({
+          status: 200,
+          href: `${file.resource.href}/attachments/${file.attachment.key}`,
+        }));
         stream.push(response);
       },
     };
