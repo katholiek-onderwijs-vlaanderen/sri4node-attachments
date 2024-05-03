@@ -1,4 +1,10 @@
-# Release Notes
+# Changelog
+
+## v2.3.2 - 3 May 2024
+
+### Fixed
+
+- File upload: allow special characters in the filename (see busboy config defParamCharset)
 
 ## version 2.3.1 (20-12-2023)
 New features: 
