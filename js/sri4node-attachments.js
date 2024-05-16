@@ -799,7 +799,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
-   * Will throw and SriError if the file is not present in the bodyJson.
+   * Will throw an SriError if the file is not present in the bodyJson.
    *
    * @param {TFileObj} file
    * @param {Array<TMultiPartSingleBodyForFileUploads>} bodyJson
@@ -1286,6 +1286,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       httpMethods: ["POST"],
       readOnly: false,
       busBoy: true,
+      // Set to utf8 to deal with special characters in the filename (default is latin1)
+      busBoyConfig: { defParamCharset: "utf-8" },
 
       /**
        * @param {IDatabase} tx
