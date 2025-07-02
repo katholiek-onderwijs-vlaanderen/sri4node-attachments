@@ -1028,6 +1028,24 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           fields: {},
         };
 
+        fileStream.on('data', chunk => {
+          sriRequest.logDebug(
+            logChannel,
+            `Received chunk: ${chunk.length}`);
+        });
+
+        fileStream.on('end', () => {
+          sriRequest.logDebug(
+            logChannel,
+            'File stream ended');
+        });
+
+        fileStream.on('error', err => {
+          sriRequest.logDebug(
+            logChannel,
+            `File stream error: ${err}`);
+        });
+
         fileObj.tmpFileName = getTmpFilename(safeFilename);
 
         tmpUploads.push(uploadTmpFile(fileObj));
