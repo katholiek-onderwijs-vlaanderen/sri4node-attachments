@@ -4,6 +4,10 @@ const { Upload } = require("@aws-sdk/lib-storage");
 const S3PresignedPost = require("@aws-sdk/s3-presigned-post");
 const mime = require("mime-types");
 const { v4: uuidv4 } = require("uuid");
+const fs = require('fs');
+const path = require('path');
+const os  = require('os');
+
 
 /**
  * When uploading a file via a POST multipart message, there must be a 'field' called body,
@@ -523,26 +527,6 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
   /**
    *
-   * @param {import('stream').Readable} fileStream
-   * @param {string} tmpFileName
-   * @returns {Promise<import("@aws-sdk/client-s3").CompleteMultipartUploadCommandOutput | import("@aws-sdk/client-s3").AbortMultipartUploadCommandOutput>}
-   */
-  async function handleFileUpload(fileStream, tmpFileName) {
-    const awss3 = getAWSS3Client();
-
-    debug(`Uploading file ${tmpFileName}`);
-    const params = {
-      Bucket: fullPluginConfig.s3bucket,
-      Key: tmpFileName,
-      ACL: "bucket-owner-full-control",
-      Body: fileStream,
-    }; // , Metadata: { "attachmentkey": fileWithJson.attachment.key }
-
-    return await new Upload({ client: awss3, params}).done();
-  }
-
-  /**
-   *
    * @param {IDatabase} tx
    * @param {TSriRequest} sriRequest
    * @param {import('stream').Readable} stream
@@ -990,23 +974,34 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
      * @returns
      */
     async function uploadTmpFile(fileObj) {
-      try {
-        sriRequest.logDebug(logChannel, `uploading tmp file ${fileObj.tmpFileName}`);
-        await handleFileUpload(fileObj.file, fileObj.tmpFileName);
-        sriRequest.logDebug(
-          logChannel,
-          `upload to s3 done for ${fileObj.tmpFileName}`
-        );
-
-        const meta = await getFileMeta(fileObj.tmpFileName);
-        fileObj.hash = meta.ETag;
-        fileObj.size = meta.ContentLength;
-
-        return fileObj;
-      } catch(err) {
-        sriRequest.logDebug(logChannel, `uploading tmp file ${fileObj.tmpFileName} failed`);
-        throw err;
-      }
+      const local = path.join(os.tmpdir(), fileObj.tmpFileName);
+  
+      await new Promise((res, rej) =>
+        fileObj.file
+          .pipe(fs.createWriteStream(local))
+          .on('error', rej)
+          .on('finish', res),
+      );
+    
+      const awss3  = getAWSS3Client();
+      const upload = new Upload({
+        client: awss3,
+        params: {
+          Bucket: fullPluginConfig.s3bucket,
+          Key:    fileObj.tmpFileName,
+          ACL:    'bucket-owner-full-control',
+          Body:   fs.createReadStream(local),
+        },
+      });
+      await upload.done();
+    
+      const meta            = await getFileMeta(fileObj.tmpFileName);
+      fileObj.hash          = meta?.ETag;          
+      fileObj.size          = meta?.ContentLength;
+    
+      await fs.promises.unlink(local).catch(() => {});
+    
+      return fileObj;
     }
 
     sriRequest.busBoy.on(
