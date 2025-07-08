@@ -1038,14 +1038,22 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       fieldsRcvd[fieldname] = val;
     });
 
+    sriRequest.logDebug(logChannel, "Wanting for busboy to finish");
+
     // wait until busboy is done
     await Promise.race([
-      pEvent(sriRequest.busBoy, "close"),
-      pEvent(sriRequest.busBoy, "finish"),
-      pEvent(sriRequest.busBoy, "error")
+      pEvent(sriRequest.busBoy, "close").then(() => {
+      sriRequest.logDebug(logChannel, "Busboy event - closed");
+      }),
+      pEvent(sriRequest.busBoy, "finish").then(() => {
+      sriRequest.logDebug(logChannel, "Busboy event - finished");
+      }),
+      pEvent(sriRequest.busBoy, "error").then((err) => {
+      sriRequest.logDebug(logChannel, `Busboy event - encountered an error: ${err}`);
+      }),
     ]);
 
-    sriRequest.logDebug(logChannel, "busBoy is done");
+    sriRequest.logDebug(logChannel, "Busboy finished");
 
     await Promise.all(tmpUploads);
     sriRequest.logDebug(logChannel, "tmp uploads done");
