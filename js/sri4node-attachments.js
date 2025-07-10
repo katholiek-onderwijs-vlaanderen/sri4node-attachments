@@ -1041,17 +1041,16 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     sriRequest.logDebug(logChannel, "Wanting for busboy to finish");
 
     // wait until busboy is done
-    await Promise.race([
-      pEvent(sriRequest.busBoy, "close").then(() => {
-      sriRequest.logDebug(logChannel, "Busboy event - closed");
-      }),
-      pEvent(sriRequest.busBoy, "finish").then(() => {
-      sriRequest.logDebug(logChannel, "Busboy event - finished");
-      }),
-      pEvent(sriRequest.busBoy, "error").then((err) => {
-      sriRequest.logDebug(logChannel, `Busboy event - encountered an error: ${err}`);
-      }),
-    ]);
+    await new Promise((resolve, reject) => {
+      sriRequest.busBoy.once("finish", () => {
+        sriRequest.logDebug(logChannel, "Busboy event - finished");
+        resolve();
+      });
+      sriRequest.busBoy.once("error", (err) => {
+        sriRequest.logDebug(logChannel, `Busboy event - error: ${err}`);
+        reject(err);
+      });
+    });
 
     sriRequest.logDebug(logChannel, "Busboy finished");
 
