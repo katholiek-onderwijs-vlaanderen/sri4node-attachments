@@ -1044,7 +1044,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     });
 
     // wait until busboy is done
-    await pEvent(sriRequest.busBoy, "close");
+    await Promise.race([
+      pEvent(sriRequest.busBoy, "close"),
+      pEvent(sriRequest.busBoy, "finish"),
+    ]);
     sriRequest.logDebug(logChannel, "busBoy is done");
 
     await Promise.all(tmpUploads);
@@ -1373,7 +1376,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           href: `${file.resource.href}/attachments/${file.attachment.key}`,
         }));
         stream.push(response);
-        
+        stream.push(null);
       },
     };
   }
