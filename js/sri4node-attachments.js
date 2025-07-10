@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require("uuid");
 const fs = require('fs');
 const path = require('path');
 const os  = require('os');
-
+const Busboy = require("busboy");  
 
 /**
  * When uploading a file via a POST multipart message, there must be a 'field' called body,
@@ -1293,7 +1293,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       routePostfix: "/attachments",
       httpMethods: ["POST"],
       readOnly: false,
-      busBoy: true,
+      busBoy: false,
       // Set to utf8 to deal with special characters in the filename (default is latin1)
       busBoyConfig: { defParamCharset: "utf-8" },
 
@@ -1308,8 +1308,19 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         let allAttachmentsWithFileObj = [];
         let allAttachmentsToHandle = [];
 
+        const bb = Busboy({
+          headers: sriRequest.headers,
+          defParamCharset: "utf-8",
+        });
+
+        sriRequest.busBoy = bb;
+
+        const recvPromise = receiveFilesAndMetadataFromBusboyAndUploadToS3(sriRequest);
+
+        sriRequest.inStream.pipe(bb);
+        
         try {
-          const { attachmentsRcvd, fieldsRcvd } = await receiveFilesAndMetadataFromBusboyAndUploadToS3(sriRequest);
+          const { attachmentsRcvd, fieldsRcvd } = await recvPromise;
 
           throwErrorWhenBodyIsMissing(fieldsRcvd.body, sriRequest);
 
