@@ -1038,7 +1038,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       fieldsRcvd[fieldname] = val;
     });
 
-    sriRequest.logDebug(logChannel, "Wanting for busboy to finish");
+    sriRequest.logDebug(logChannel, "Waiting for busboy to finish");
 
     // wait until busboy is done
     await new Promise((resolve, reject) => {
@@ -1384,8 +1384,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           ]);
         }
         /// all went well, rename the files to their real names now.
-        //await renameAttachmentsToRealNames(allAttachmentsWithFileObj);
-        renameAttachmentsToRealNames(allAttachmentsWithFileObj);
+        await renameAttachmentsToRealNames(allAttachmentsWithFileObj);
+        //renameAttachmentsToRealNames(allAttachmentsWithFileObj);
 
         const response = allAttachmentsToHandle.map((file) => ({
           status: 200,
