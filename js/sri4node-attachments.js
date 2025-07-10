@@ -1391,6 +1391,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           href: `${file.resource.href}/attachments/${file.attachment.key}`,
         }));
         stream.push(response);
+        stream.push(null);
       },
     };
   }
