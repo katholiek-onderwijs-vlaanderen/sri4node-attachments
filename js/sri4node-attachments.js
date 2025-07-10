@@ -1384,7 +1384,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           ]);
         }
         /// all went well, rename the files to their real names now.
-        await renameAttachmentsToRealNames(allAttachmentsWithFileObj);
+        //await renameAttachmentsToRealNames(allAttachmentsWithFileObj);
+        renameAttachmentsToRealNames(allAttachmentsWithFileObj);
 
         const response = allAttachmentsToHandle.map((file) => ({
           status: 200,
