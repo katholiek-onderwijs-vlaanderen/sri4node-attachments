@@ -1368,7 +1368,6 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         }
 
         stream.push(response);
-        stream.push(null);
       },
     };
   }
