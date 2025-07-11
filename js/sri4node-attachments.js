@@ -1,6 +1,8 @@
 const pEvent = require("p-event");
+const pMap = require("p-map");
 const S3 = require("@aws-sdk/client-s3");
 const { Upload } = require("@aws-sdk/lib-storage");
+const { PassThrough } = require("stream"); 
 const S3PresignedPost = require("@aws-sdk/s3-presigned-post");
 const mime = require("mime-types");
 const { v4: uuidv4 } = require("uuid");
@@ -530,15 +532,28 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   async function handleFileUpload(fileStream, tmpFileName) {
     const awss3 = getAWSS3Client();
 
+    const pass = new PassThrough({ highWaterMark: 8 * 1024 * 1024 });
+
+    fileStream.on("data", (chunk) => {
+      if (!pass.write(chunk)) pass.emit("drain");
+    });
+
+    fileStream.on("end", () => pass.end());
+
     debug(`Uploading file ${tmpFileName}`);
     const params = {
       Bucket: fullPluginConfig.s3bucket,
       Key: tmpFileName,
       ACL: "bucket-owner-full-control",
-      Body: fileStream,
-    }; // , Metadata: { "attachmentkey": fileWithJson.attachment.key }
+      Body: pass,
+    };
 
-    return await new Upload({ client: awss3, params}).done();
+    return await new Upload({
+      client: awss3,
+      params,
+      queueSize: 1,
+      partSize: 1 * 1024 * 1024,
+    }).done();
   }
 
   /**
@@ -982,7 +997,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     /** @type {Array<TFileObj>} */
     const attachmentsRcvd = [];
     const fieldsRcvd = {};
-    const tmpUploads = [];
+    const uploads = [];
 
     /**
      *
@@ -1030,7 +1045,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
         fileObj.tmpFileName = getTmpFilename(safeFilename);
 
-        tmpUploads.push(uploadTmpFile(fileObj));
+        uploads.push(fileObj);
         attachmentsRcvd.push(fileObj);
       }
     );
@@ -1050,7 +1065,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     ]);
     sriRequest.logDebug(logChannel, "busBoy is done");
 
-    await Promise.all(tmpUploads);
+    await pMap(uploads, (fo) => uploadTmpFile(fo), { concurrency: 2 });
+
     sriRequest.logDebug(logChannel, "tmp uploads done");
 
     return { attachmentsRcvd, fieldsRcvd };
@@ -1375,6 +1391,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           status: 200,
           href: `${file.resource.href}/attachments/${file.attachment.key}`,
         }));
+
+        if (sriRequest?.setHeader) {
+          sriRequest.setHeader("Connection", "close");
+        }
+
         stream.push(response);
         stream.push(null);
       },
