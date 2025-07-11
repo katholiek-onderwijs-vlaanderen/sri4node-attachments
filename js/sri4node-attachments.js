@@ -4,6 +4,7 @@ const { Upload } = require("@aws-sdk/lib-storage");
 const S3PresignedPost = require("@aws-sdk/s3-presigned-post");
 const mime = require("mime-types");
 const { v4: uuidv4 } = require("uuid");
+const Busboy = require("busboy");
 
 /**
  * When uploading a file via a POST multipart message, there must be a 'field' called body,
@@ -980,10 +981,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    */
   async function receiveFilesAndMetadataFromBusboyAndUploadToS3(sriRequest) {
     /** @type {Array<TFileObj>} */
-    const attachmentsRcvd = [];
-    const fieldsRcvd = {};
-    const tmpUploads = [];
-
+    
     /**
      *
      * @param {TFileObj} fileObj
@@ -1009,59 +1007,45 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       }
     }
 
-    sriRequest.busBoy.on(
-      "file",
-      async (fieldname, fileStream, { filename, encoding, mimeType }) => {
-        const safeFilename = getSafeFilename(filename);
-
-        sriRequest.logDebug(
-          logChannel,
-          `BUSBOY File [${fieldname}]: filename: ${safeFilename}, encoding: ${encoding}, mimetype: ${mimeType}`
-        );
-
-        /** @type {TFileObj} */
-        const fileObj = {
-          filename: safeFilename,
-          originalFilename: filename,
-          mimetype: mimeType,
-          file: fileStream,
-          fields: {},
+    return new Promise((resolve, reject) => {
+      const bb = Busboy({
+        headers: sriRequest.headers,
+        defParamCharset: 'utf-8',
+        limits: { fileSize: fullPluginConfig.maximumFilesizeInMB * 1024 * 1024 }
+      });
+  
+      const attachmentsRcvd = [];
+      const fieldsRcvd      = {};
+      const tmpUploads      = [];      
+  
+      bb.on('file', (fieldname, stream, info) => {
+        const safeName = getSafeFilename(info.filename);
+        const fileObj  = {
+          filename    : safeName,
+          mimetype    : info.mimeType,
+          file        : stream,
+          tmpFileName : getTmpFilename(safeName)
         };
-
-        fileObj.tmpFileName = getTmpFilename(safeFilename);
-
+  
         tmpUploads.push(uploadTmpFile(fileObj));
         attachmentsRcvd.push(fileObj);
-      }
-    );
-
-    sriRequest.busBoy.on("field", (fieldname, val, _info) => {
-      sriRequest.logDebug(
-        logChannel,
-        `BUSBOY Field [${fieldname}]: value: ${val}`
-      );
-      fieldsRcvd[fieldname] = val;
+      });
+  
+      bb.on('field', (name, val) => { fieldsRcvd[name] = val; });
+  
+      bb.once('error', reject);
+  
+      bb.once('finish', async () => {
+        try {
+          await Promise.all(tmpUploads);
+          resolve({ attachmentsRcvd, fieldsRcvd });
+        } catch (err) {
+          reject(err);
+        }
+      });
+  
+      sriRequest._rawReq.pipe(bb);
     });
-
-    // wait until busboy is done
-    const timeout = 30000; // Set a timeout of 30 seconds
-    try {
-      await Promise.race([
-      pEvent(sriRequest.busBoy, "close"),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("File upload timeout")), timeout)
-      ),
-      ]);
-    } catch (error) {
-      sriRequest.logDebug(logChannel, `Error during file upload: ${error.message}`);
-      throw error;
-    }
-    sriRequest.logDebug(logChannel, "busBoy is done");
-
-    await Promise.all(tmpUploads);
-    sriRequest.logDebug(logChannel, "tmp uploads done");
-
-    return { attachmentsRcvd, fieldsRcvd };
   }
 
 
