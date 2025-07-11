@@ -17,6 +17,7 @@
     "@aws-sdk/s3-presigned-post": "^3.290.0",
     "busboy": "^1.6.0",
     "mime-types": "^2.1.21",
+    "multiparty": "^4.2.3",
     "p-event": "^2.0.0",
     "q": "^1.0.1",
     "uuid": "9.0.0"

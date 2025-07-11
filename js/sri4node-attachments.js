@@ -1,5 +1,6 @@
 const pEvent = require("p-event");
 const pMap = require("p-map");
+const multiparty = require("multiparty"); 
 const S3 = require("@aws-sdk/client-s3");
 const { Upload } = require("@aws-sdk/lib-storage");
 const { PassThrough } = require("stream"); 
@@ -983,95 +984,65 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
   }
 
-
-  /**
-   * This function gathers files and meta data via the Busboy library and then
-   * uploads the files to a S3 bucket.
-   * 
-   * Receiving files from the request and upload them to S3 are kept in one function to be able to
-   * directly stream incoming data to S3 and keep memory usage low.
-   * @param {TSriRequest} sriRequest 
-   * @returns 
-   */
-  async function receiveFilesAndMetadataFromBusboyAndUploadToS3(sriRequest) {
-    /** @type {Array<TFileObj>} */
-    const attachmentsRcvd = [];
-    const fieldsRcvd = {};
-    const uploads = [];
-
-    /**
-     *
-     * @param {TFileObj} fileObj
-     * @returns
-     */
-    async function uploadTmpFile(fileObj) {
-      try {
-        sriRequest.logDebug(logChannel, `uploading tmp file ${fileObj.tmpFileName}`);
-        await handleFileUpload(fileObj.file, fileObj.tmpFileName);
-        sriRequest.logDebug(
-          logChannel,
-          `upload to s3 done for ${fileObj.tmpFileName}`
-        );
-
-        const meta = await getFileMeta(fileObj.tmpFileName);
-        fileObj.hash = meta.ETag;
-        fileObj.size = meta.ContentLength;
-
-        return fileObj;
-      } catch(err) {
-        sriRequest.logDebug(logChannel, `uploading tmp file ${fileObj.tmpFileName} failed`);
-        throw err;
+    function receiveFilesAndMetadataFromMultipartAndUploadToS3(sriRequest) {
+        return new Promise((resolve, reject) => {
+          const form = new multiparty.Form({
+            maxFilesSize: fullPluginConfig.maximumFilesizeInMB * 1024 * 1024,
+          });
+    
+          /** @type {Array<TFileObj>} */
+          const attachmentsRcvd = [];
+          const fieldsRcvd      = {};
+          const uploadPromises  = [];
+    
+          form.on("part", (part) => {
+            if (part.filename) {
+              const safeFilename = getSafeFilename(part.filename);
+              sriRequest.logDebug(
+                logChannel,
+                `MULTIPART File [${part.name}]: ${safeFilename}`
+              );
+    
+              /** @type {TFileObj} */
+              const fileObj = {
+                filename: safeFilename,
+                originalFilename: part.filename,
+                mimetype: part.headers["content-type"] ||
+                          mime.lookup(safeFilename) || "application/octet-stream",
+                file: part,
+                fields: {},
+              };
+              fileObj.tmpFileName = getTmpFilename(safeFilename);
+              attachmentsRcvd.push(fileObj);
+    
+              uploadPromises.push(
+                handleFileUpload(part, fileObj.tmpFileName)
+                 .then(async () => {
+                    const meta = await getFileMeta(fileObj.tmpFileName);
+                    fileObj.hash = meta.ETag;
+                    fileObj.size = meta.ContentLength;
+                  })
+              );
+            } else {
+              let buf = "";
+              part.on("data", (chunk) => (buf += chunk));
+              part.on("end",  () => (fieldsRcvd[part.name] = buf));
+            }
+          });
+    
+          form.on("error", reject);
+          form.on("close", () => {
+            Promise.all(uploadPromises)
+              .then(() => {
+                sriRequest.logDebug(logChannel, "multiparty uploads done");
+                resolve({ attachmentsRcvd, fieldsRcvd });
+              })
+              .catch(reject);
+          });
+    
+          form.parse(sriRequest.req);
+        });
       }
-    }
-
-    sriRequest.busBoy.on(
-      "file",
-      async (fieldname, fileStream, { filename, encoding, mimeType }) => {
-        const safeFilename = getSafeFilename(filename);
-
-        sriRequest.logDebug(
-          logChannel,
-          `BUSBOY File [${fieldname}]: filename: ${safeFilename}, encoding: ${encoding}, mimetype: ${mimeType}`
-        );
-
-        /** @type {TFileObj} */
-        const fileObj = {
-          filename: safeFilename,
-          originalFilename: filename,
-          mimetype: mimeType,
-          file: fileStream,
-          fields: {},
-        };
-
-        fileObj.tmpFileName = getTmpFilename(safeFilename);
-
-        uploads.push(fileObj);
-        attachmentsRcvd.push(fileObj);
-      }
-    );
-
-    sriRequest.busBoy.on("field", (fieldname, val, _info) => {
-      sriRequest.logDebug(
-        logChannel,
-        `BUSBOY Field [${fieldname}]: value: ${val}`
-      );
-      fieldsRcvd[fieldname] = val;
-    });
-
-    // wait until busboy is done
-    await Promise.race([
-      pEvent(sriRequest.busBoy, "close"),
-      pEvent(sriRequest.busBoy, "finish"),
-    ]);
-    sriRequest.logDebug(logChannel, "busBoy is done");
-
-    await pMap(uploads, (fo) => uploadTmpFile(fo), { concurrency: 2 });
-
-    sriRequest.logDebug(logChannel, "tmp uploads done");
-
-    return { attachmentsRcvd, fieldsRcvd };
-  }
-
 
   /**
    * 
@@ -1304,7 +1275,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       routePostfix: "/attachments",
       httpMethods: ["POST"],
       readOnly: false,
-      busBoy: true,
+      busBoy: false,
       // Set to utf8 to deal with special characters in the filename (default is latin1)
       busBoyConfig: { defParamCharset: "utf-8" },
 
@@ -1320,7 +1291,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         let allAttachmentsToHandle = [];
 
         try {
-          const { attachmentsRcvd, fieldsRcvd } = await receiveFilesAndMetadataFromBusboyAndUploadToS3(sriRequest);
+          const { attachmentsRcvd, fieldsRcvd } = await receiveFilesAndMetadataFromMultipartAndUploadToS3(sriRequest);
 
           throwErrorWhenBodyIsMissing(fieldsRcvd.body, sriRequest);
 
