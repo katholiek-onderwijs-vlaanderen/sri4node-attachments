@@ -4,6 +4,10 @@ const { Upload } = require("@aws-sdk/lib-storage");
 const S3PresignedPost = require("@aws-sdk/s3-presigned-post");
 const mime = require("mime-types");
 const { v4: uuidv4 } = require("uuid");
+const { pipeline } = require("stream");
+const { promisify } = require("util");
+
+const pipelineAsync = promisify(pipeline);
 
 /**
  * When uploading a file via a POST multipart message, there must be a 'field' called body,
@@ -339,30 +343,23 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       // const stream = response.Body.transformToWebStream();
       const stream = response.Body;
 
-      return new Promise((resolve, reject) => {
-        // Also need to listen for close on outstream, to stop in case the request is aborted
-        // at client-side before the end of the input stream (S3 file).
-        outstream.on("close", () => {
+      // Use pipeline with proper cleanup - it handles most edge cases automatically
+      try {
+        // @ts-ignore - AWS SDK stream types
+        await pipelineAsync(stream, outstream);
+        debug("[downloadFromS3] Finished download of file.");
+      } catch (err) {
+        // Check if it's a client disconnect (outstream closed)
+        if (outstream.destroyed) {
           debug("[downloadFromS3] stream closed prematurely");
-          reject(new Error("499 partial content"));
-        });
+          throw new Error("499 partial content");
+        }
 
-        // @ts-ignore
-        stream.on("error", (err) => {
-          const msg = "[downloadFromS3] error while reading stream";
-          error(msg);
-          error(err);
-          reject(new Error(`500 ${msg}`));
-        });
-        // @ts-ignore
-        stream.on("end", () => {
-          debug("[downloadFromS3] Finished download of file.");
-          resolve();
-        });
-
-        // @ts-ignore
-        stream.pipe(outstream);
-      });
+        const msg = "[downloadFromS3] error during stream pipeline";
+        error(msg);
+        error(err);
+        throw new Error(`500 ${msg}`);
+      }
     } catch (err) {
       error("[downloadFromS3] the download failed:");
       error(err);
