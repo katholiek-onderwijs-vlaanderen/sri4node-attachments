@@ -295,8 +295,31 @@ exports = module.exports = function (httpClient, type) {
         }
       });
 
-    });
+      it("should allow adding an attachment with special characters (eg ¨) in the filename", async () => {
+        const body = {
+          type: "person",
+          name: "test user",
+          status: "active",
+        };
+        const [resourceKey, attachmentKey] = Array.from({ length: 2 }, () => uuid.v4());
+        const resourceHref = type + "/" + resourceKey;
 
+        const responsePut = await httpClient.put({ path: resourceHref, body });
+        assert.equal(responsePut.status, 201);
+
+        // Add attachment
+        debug("PUTting the profile image as attachment");
+        const filesToPut = [
+          {
+            remotefileName: "pröfile.png",
+            localFilename: "test/images/orange-boy-icon.png",
+            attachmentKey,
+            resourceHref,
+          },
+        ];
+        await uploadFilesAndCheck(httpClient, filesToPut);
+      });
+    });
 
     describe("PUT MULTIPLE (customRouteForUpload)", function () {
       it("should allow adding of 2 files as attachment in a single POST multipart/form-data operation" +
