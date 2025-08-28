@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.3.3 - 28 August 2025
+
+### Fixed
+
+- Attachments plugin streaming race condition when connection is terminated before the download has started, leaving the connection/request open for ever.
+
 ## v2.3.2 - 3 May 2024
 
 ### Fixed
