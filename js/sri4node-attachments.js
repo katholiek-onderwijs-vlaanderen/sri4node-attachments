@@ -199,15 +199,21 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    */
   function getAWSS3Client() {
     if (!this.awss3client) {
+      // If accessKeyId and secretAccessKey are provided, use them; otherwise, let the SDK use the default credential provider chain (including IAM roles)
+      const credentials =
+        fullPluginConfig.s3key && fullPluginConfig.s3secret
+          ? {
+            accessKeyId: fullPluginConfig.s3key,
+            secretAccessKey: fullPluginConfig.s3secret,
+          }
+          : undefined;
+
       this.awss3client = new S3.S3Client({
         endpoint: fullPluginConfig.endpoint, // essential to point to our localstack-on-docker
         apiVersion: "2006-03-01",
         region: fullPluginConfig.s3region,
         maxAttempts: fullPluginConfig.maxRetries,
-        credentials: {
-          accessKeyId: fullPluginConfig.s3key,
-          secretAccessKey: fullPluginConfig.s3secret,
-        },
+        credentials,
         forcePathStyle: true, // IMPORTANT cfr. https://qubyte.codes/blog/tip-connecting-to-localstack-s3-using-the-javascript-aws-sdk-v3
       });
     }

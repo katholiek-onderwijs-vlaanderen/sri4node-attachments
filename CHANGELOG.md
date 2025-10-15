@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.3.4 - 15 October 2025
+Allow connecting to s3 buckets without access keys (so use the IAM role)
+
 ## v2.3.3 - 28 August 2025
 
 ### Fixed
