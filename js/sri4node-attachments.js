@@ -667,15 +667,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     if (fullPluginConfig.security.abilityAppend) {
       attAbility += fullPluginConfig.security.abilityAppend;
     }
-    const t = [...resources];
-    await security.checkPermissionOnResourceList(
-      tx,
-      sriRequest,
-      attAbility,
-      t,
-      undefined,
-      true
-    );
+    const elementsToCheck = [...resources].map((resource) => ({permalink: resource}));
+    await security.check(tx, sriRequest, elementsToCheck, ability);
   }
 
   /**
