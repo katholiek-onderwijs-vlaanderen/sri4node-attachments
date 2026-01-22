@@ -1638,7 +1638,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    */
   function customRouteForDelete(getFileNameHandler, afterHandler) {
     return {
-      routePostfix: "/:key/attachments/:attachmentKey",
+      routePostfix: "/:key/attachments/:attachmentKey([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
       readOnly: false,
       httpMethods: ["DELETE"],
       /**
@@ -1683,7 +1683,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    */
   function customRouteForGet(getAttJson) {
     return {
-      routePostfix: "/:key/attachments/:attachmentKey",
+      routePostfix: "/:key/attachments/:attachmentKey([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
       httpMethods: ["GET"],
       readOnly: true,
       beforeHandler: async (tx, sriRequest, _customMapping, _internalUtils) => {
