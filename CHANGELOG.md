@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.3.5 - 13 Januari 2026
+Use the newly exposed "check" of sri4node-security to be able to configure the new security plugin "useIsPartOfInsteadOfLocalCheck" option to get raw resources from security resolved with /ispartof (needed when local resolving is nog possible as in persons-api-sri4node)
+
 ## v2.3.4 - 15 October 2025
 Allow connecting to s3 buckets without access keys (so use the IAM role)
 
