@@ -132,6 +132,7 @@ function getSafeFilename(filename) {
  *        description: string;
  *      }> } TGetAttJsonFun
  * @typedef { ( tx:any, sriRequest: TSriRequest, key: string, filename: string ) => Promise<void> } TCheckDownloadFun
+ * @typedef { ( tx:any, sriRequest: TSriRequest) => Promise<[[string, string]]> } TGetCacheHeadersFun
  * @typedef { (tx: IDatabase, sriRequest: TSriRequest, resourceKey: string, attachmentKey: string) => Promise<string> } TGetFileNameHandlerFun
  * @typedef { (tx: IDatabase, sriRequest: TSriRequest, resourceKey: string, attachmentKey: string) => Promise<void> } TAfterHandlerFun
  * @typedef { (href: string) => string } TGetResourceForCopyFun
@@ -1567,9 +1568,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * /resource/attachments/<filename> route to download an attachment.
    *
    * @param { TCheckDownloadFun } checkDownload
+   * @param { TGetCacheHeadersFun } getCacheHeaders
    * @returns {TCustomRoute}
    */
-  function customRouteForDownload(checkDownload) {
+  function customRouteForDownload(checkDownload, getCacheHeaders) {
     return {
       routePostfix: "/:key/attachments/:filename([^/]*.[A-Za-z0-9]{1,})",
       httpMethods: ["GET"],
@@ -1601,6 +1603,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           contentType = mime.lookup(sriRequest.params.filename);
         }
 
+        const cacheHeaders = getCacheHeaders ? await getCacheHeaders(tx, sriRequest) : [];
+
         return {
           status: 200,
           headers: [
@@ -1612,6 +1616,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
               )}"`,
             ],
             ["Content-Type", contentType],
+            ...cacheHeaders
           ],
         };
       },
