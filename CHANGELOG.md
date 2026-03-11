@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.3.6 - 12 February 2026
+Added optional new parameter for customRouteForDownload: getCacheHeaders, a function that is called to allow the client to set caching headers based on sriRequest.
+
 ## v2.3.5 - 13 Januari 2026
 Use the newly exposed "check" of sri4node-security to be able to configure the new security plugin "useIsPartOfInsteadOfLocalCheck" option to get raw resources from security resolved with /ispartof (needed when local resolving is nog possible as in persons-api-sri4node)
 
