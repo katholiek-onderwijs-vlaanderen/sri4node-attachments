@@ -440,6 +440,10 @@ async function expectRequestError(doRequest, expectedStatus, expectedCode) {
         text.includes(expectedCode),
         `expected error code '${expectedCode}' in partial body, got: ${text.slice(0, 500)}`
       );
+      assert.ok(
+        new RegExp(`"status"\\s*:\\s*${expectedStatus}\\b`).test(text),
+        `expected status ${expectedStatus} in partial body, got: ${text.slice(0, 500)}`
+      );
       return;
     }
     throw e;
