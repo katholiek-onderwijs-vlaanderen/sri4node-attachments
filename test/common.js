@@ -413,6 +413,70 @@ function partialBodyToString(partialBody) {
 }
 
 /**
+ * Escapes a string for literal use inside a RegExp.
+ * @param {string} s
+ */
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Tries to extract the JSON error object that sri4node writes into the stream
+ * (possibly preceded by padding like "\n\n\n____").
+ * @param {string} text
+ * @returns {any | undefined}
+ */
+function parseErrorJsonFromPartialBody(text) {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) return undefined;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Normalizes an error body: sri4node can return either { errors, status }
+ * or a wrapped SriError { status, body: { errors, status } }.
+ * @param {any} body
+ * @returns {{ status?: number, errors?: any[] } | undefined}
+ */
+function normalizeErrorBody(body) {
+  if (!body || typeof body !== "object") return undefined;
+  if (Array.isArray(body.errors)) return body;
+  if (body.body && typeof body.body === "object" && Array.isArray(body.body.errors)) {
+    return { status: body.status ?? body.body.status, errors: body.body.errors };
+  }
+  return body;
+}
+
+
+/**
+ * Checks that the (parsed) error body contains exactly the expected code and status.
+ * @param {any} rawBody
+ * @param {number} expectedStatus
+ * @param {string} expectedCode
+ * @param {string} context
+ */
+function assertErrorBody(rawBody, expectedStatus, expectedCode, context) {
+  const body = normalizeErrorBody(rawBody);
+  assert.ok(
+    body && Array.isArray(body.errors),
+    `${context}: expected an errors array, got ${JSON.stringify(rawBody)}`
+  );
+  const codes = body.errors.map((e) => e.code);
+  assert.ok(
+    codes.includes(expectedCode),
+    `${context}: expected error code '${expectedCode}', got [${codes.join(", ")}]`
+  );
+  if (body.status !== undefined) {
+    assert.equal(body.status, expectedStatus, `${context}: unexpected status in body`);
+  }
+}
+
+/**
  * Expects a request to fail with the given status and error code.
  * Accepts both:
  *  - a proper error response (status + JSON body with errors[])
@@ -436,12 +500,21 @@ async function expectRequestError(doRequest, expectedStatus, expectedCode) {
   } catch (e) {
     if (e && e.code === "streaming.body.read.failed") {
       const text = partialBodyToString(e.partialBody);
+      const parsed = parseErrorJsonFromPartialBody(text);
+      if (parsed !== undefined) {
+        assertErrorBody(parsed, expectedStatus, expectedCode, "partial body");
+        return;
+      }
+
+      // fallback when the JSON is truncated: require an exact "code" field and status field
+      const codeRe = new RegExp(`"code"\\s*:\\s*"${escapeRegExp(expectedCode)}"`);
+      const statusRe = new RegExp(`"status"\\s*:\\s*${expectedStatus}(?!\\d)`);
       assert.ok(
-        text.includes(expectedCode),
-        `expected error code '${expectedCode}' in partial body, got: ${text.slice(0, 500)}`
+        codeRe.test(text),
+        `expected exact error code '${expectedCode}' in partial body, got: ${text.slice(0, 500)}`
       );
       assert.ok(
-        new RegExp(`"status"\\s*:\\s*${expectedStatus}\\b`).test(text),
+        statusRe.test(text),
         `expected status ${expectedStatus} in partial body, got: ${text.slice(0, 500)}`
       );
       return;
@@ -454,10 +527,8 @@ async function expectRequestError(doRequest, expectedStatus, expectedCode) {
     expectedStatus,
     `expected status ${expectedStatus}, got ${response.status}: ${JSON.stringify(body)}`
   );
-  assert.ok(
-    body && Array.isArray(body.errors) && body.errors.some((err) => err.code === expectedCode),
-    `expected error code '${expectedCode}', got ${JSON.stringify(body)}`
-  );
+  const parsedBody = typeof body === "string" ? JSON.parse(body) : body;
+  assertErrorBody(parsedBody, expectedStatus, expectedCode, "response body");
 }
 
 exports = module.exports = {
