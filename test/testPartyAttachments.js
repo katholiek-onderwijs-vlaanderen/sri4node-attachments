@@ -3,7 +3,7 @@ const { randomUUID: uuidv4 } = require("crypto");
 const { debug } = require("../js/common.js");
 const fs = require("fs");
 
-const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody, expectRequestError } = require("./common.js");
+const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody, expectRequestError, listTmpObjects } = require("./common.js");
 const { beforeEach } = require("mocha");
 
 exports = module.exports = function (httpClient, type) {
@@ -226,11 +226,14 @@ exports = module.exports = function (httpClient, type) {
           0,
           resourceHref.lastIndexOf("/")
         );
+        const tmpBefore = new Set(await listTmpObjects());
         await expectRequestError(
           () => doPutFiles(httpClient, basePath, filesToPut3),
           409,
           "file.already.exists"
         );
+        const leftovers = (await listTmpObjects()).filter((k) => !tmpBefore.has(k));
+        assert.deepEqual(leftovers, [], `tmp files not cleaned up: ${leftovers.join(", ")}`);
       });
 
       it("invalid combination of copy and upload properties should give an error", async () => {
@@ -273,11 +276,14 @@ exports = module.exports = function (httpClient, type) {
         await uploadFilesAndCheck(httpClient, filesToPut);
         const href = filesToPut[0].resourceHref;
         const basePath = href.substring(0, href.lastIndexOf("/"));
+        const tmpBefore = new Set(await listTmpObjects());
         await expectRequestError(
           () => doPutFiles(httpClient, basePath, filesToPutInvalid),
           400,
           "upload.and.copy.mix"
         );
+        const leftovers = (await listTmpObjects()).filter((k) => !tmpBefore.has(k));
+        assert.deepEqual(leftovers, [], `tmp files not cleaned up: ${leftovers.join(", ")}`);
       });
 
       it("should allow adding an attachment with special characters (eg ¨) in the filename", async () => {
@@ -506,6 +512,44 @@ exports = module.exports = function (httpClient, type) {
 
         // Delete and verify the original attachment
         await deleteAttachmentAndVerify(httpClient, attachmentUrl, attachmentDownloadUrl);
+      });
+    });
+
+    describe("download contract (backward compatibility)", function () {
+      it("returns 404 for a non-existing attachment", async () => {
+        const resourceKey = uuidv4();
+        await httpClient.put({
+          path: `${type}/${resourceKey}`,
+          body: { type: "person", name: "test user", status: "active" },
+        });
+        const res = await httpClient.get({
+          path: `${type}/${resourceKey}/attachments/does-not-exist.png`,
+        });
+        assert.equal(res.status, 404);
+      });
+
+      it("returns 200 with correct content-type and content-disposition", async () => {
+        const resourceKey = uuidv4();
+        const resourceHref = `${type}/${resourceKey}`;
+        await httpClient.put({
+          path: resourceHref,
+          body: { type: "person", name: "test user", status: "active" },
+        });
+        await uploadFilesAndCheck(httpClient, [
+          {
+            remotefileName: "profile.png",
+            localFilename: "test/images/orange-boy-icon.png",
+            attachmentKey: uuidv4(),
+            resourceHref,
+          },
+        ]);
+        const res = await httpClient.get({
+          path: `${resourceHref}/attachments/profile.png`,
+          streaming: true,
+        });
+        assert.equal(res.status, 200);
+        assert.match(String(res.headers["content-type"]), /image\/png/);
+        assert.match(String(res.headers["content-disposition"] ?? ""), /profile\.png/);
       });
     });
 
@@ -916,12 +960,15 @@ exports = module.exports = function (httpClient, type) {
           },
         ]);
 
+        const tmpBefore = new Set(await listTmpObjects());
         const copyAttResult2 = await httpClient.post({
           path: `${type}/attachments/copy`,
           body: copyAttBody2,
         });
         assert.equal(copyAttResult2.status, 409);
         assert.equal(copyAttResult2.body.errors[0].code, "file.already.exists");
+        const leftovers = (await listTmpObjects()).filter((k) => !tmpBefore.has(k));
+        assert.deepEqual(leftovers, [], `tmp files not cleaned up: ${leftovers.join(", ")}`);
       });
 
     });
@@ -995,10 +1042,43 @@ exports = module.exports = function (httpClient, type) {
       });
     });
   });
+
+  describe("rollback of tmp files", function () {
+    it("upload + copy in one request where the last one fails leaves no tmp files", async () => {
+      const body = { type: "person", name: "test user", status: "active" };
+      const [resourceKey, key1, key2, key3, key4] = Array.from({ length: 5 }, () => uuidv4());
+      const resourceHref = `${type}/${resourceKey}`;
+      assert.equal((await httpClient.put({ path: resourceHref, body })).status, 201);
+
+      await uploadFilesAndCheck(httpClient, [
+        { remotefileName: "existing.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: key1, resourceHref },
+      ]);
+
+      const tmpBefore = new Set(await listTmpObjects());
+      await expectRequestError(
+        () =>
+          doPutFiles(httpClient, type, [
+            // copy -> creates a tmp file
+            { remotefileName: "copy.png", urlToCopy: `${resourceHref}/attachments/existing.png`, attachmentKey: key2, resourceHref },
+            // upload -> creates a tmp file
+            { remotefileName: "new.png", localFilename: "test/images/avatar-black.png", attachmentKey: key3, resourceHref },
+            // same name as existing, different key -> fails
+            { remotefileName: "existing.png", localFilename: "test/images/avatar-blue.png", attachmentKey: key4, resourceHref },
+          ]),
+        409,
+        "file.already.exists"
+      );
+      const leftovers = (await listTmpObjects()).filter((k) => !tmpBefore.has(k));
+      assert.deepEqual(leftovers, [], `tmp files not cleaned up: ${leftovers.join(", ")}`);
+
+      // nothing of the failed request may be visible
+      assert.equal((await httpClient.get({ path: `${resourceHref}/attachments/copy.png` })).status, 404);
+      assert.equal((await httpClient.get({ path: `${resourceHref}/attachments/new.png` })).status, 404);
+    });
+  });
 };
 
 
-// TODO: test rollback (delete of temp files) in case of error
 // TODO: check if mimetype is set as expected
 
 // No testcase for customRouteForPreSignedUpload provided yet as it is not used
@@ -1008,4 +1088,3 @@ exports = module.exports = function (httpClient, type) {
 // TODO : When BLOB database storage is implemented, also add a resource on that with tests
 // TODO : Implement + check after & before function (with database access) on GET, PUT and DELETE.
 // TODO : add test for filename with special characters (check originalFilename and filename).
-// TODO : add testcase uploading multiple attachments with a failure during the last one -> everything should be rolled (tmp files removed)

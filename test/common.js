@@ -1,4 +1,5 @@
 /*global Buffer*/
+const { ListObjectsV2Command, S3Client } = require("@aws-sdk/client-s3");
 const assert = require("assert");
 const FormData = require('form-data');
 const fs = require("fs");
@@ -536,6 +537,29 @@ async function expectRequestError(doRequest, expectedStatus, expectedCode) {
   assertErrorBody(parsedBody, expectedStatus, expectedCode, "response body");
 }
 
+/**
+ * Lists the keys of all .tmp objects in the test bucket.
+ * @returns {Promise<string[]>}
+ */
+async function listTmpObjects() {
+  const s3 = new S3Client({
+    endpoint: "http://localhost:4566/",
+    region: "eu-west-1",
+    forcePathStyle: true,
+    credentials: { accessKeyId: "test", secretAccessKey: "test" },
+  });
+  const keys = [];
+  let ContinuationToken;
+  do {
+    const res = await s3.send(
+      new ListObjectsV2Command({ Bucket: "tests3bucket", ContinuationToken })
+    );
+    keys.push(...(res.Contents ?? []).map((o) => o.Key).filter((k) => k.endsWith(".tmp")));
+    ContinuationToken = res.NextContinuationToken;
+  } while (ContinuationToken);
+  return keys;
+}
+
 exports = module.exports = {
   doGetStream,
   checkStreamEqual,
@@ -545,4 +569,5 @@ exports = module.exports = {
   uploadFilesAndCheck,
   copyFilesAndCheck,
   expectRequestError,
+  listTmpObjects,
 };
