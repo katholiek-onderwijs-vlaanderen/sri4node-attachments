@@ -6,7 +6,6 @@ const mime = require("mime-types");
 const { randomUUID: uuidv4 } = require("crypto");
 const { pipeline } = require("stream");
 const { promisify } = require("util");
-const { errorToLogObject } = require("sri4node");
 
 const pipelineAsync = promisify(pipeline);
 
@@ -168,6 +167,7 @@ function getSafeFilename(filename) {
  */
 async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
+  const { errorToLogObject } = sri4node;
   const logChannel = /** @type {const} */ ("sri4node-attachments");
 
   // default configuration
