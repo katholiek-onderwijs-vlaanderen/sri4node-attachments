@@ -4,8 +4,8 @@
   "description": "A standard implementation to support attachments on sri4node resources.",
   "main": "js/sri4node-attachments.js",
   "scripts": {
-    "pretest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml down --volumes --rmi=local --remove-orphans; DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml up --wait && sleep 3 && docker compose -f ./test/docker-compose.yml exec localstack  awslocal s3api create-bucket --bucket tests3bucket",
-    "test": "mocha --timeout 500000 test/tests.js",
+    "pretest": "docker compose -f test/docker-compose.yml down --volumes --rmi=local --remove-orphans; docker compose -f test/docker-compose.yml up --wait && sleep 5",
+    "test": "mocha --timeout 500000 --node-option no-experimental-webstorage test/tests.js",
     "posttest": "DOCKER_BUILDKIT=1 docker compose -f test/docker-compose.yml down --volumes --rmi=local --remove-orphans",
     "lint": "eslint js test",
     "prettier:check": "npx prettier --check .",
@@ -17,24 +17,27 @@
     "@aws-sdk/s3-presigned-post": "^3.290.0",
     "mime-types": "^2.1.21",
     "p-event": "^2.0.0",
-    "q": "^1.0.1",
-    "uuid": "9.0.0"
+    "q": "^1.0.1"
   },
   "devDependencies": {
     "@types/busboy": "^1.5.0",
-    "@types/mocha": "^10.0.1",
+    "@types/mocha": "^10.0.10",
     "await-sleep": "^0.0.1",
     "eslint": "^8.30.0",
     "eslint-config-prettier": "^8.7.0",
     "eslint-plugin-import": "^2.26.0",
     "express": "^4.18.2",
     "form-data": "^4.0.0",
-    "mocha": "^10.2.0",
+    "mocha": "^12.0.3",
     "pg": "^8.9.0",
     "prettier": "^2.8.4",
     "rewire": "^6.0.0",
-    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.20",
-    "undici": "^5.23.0"
+    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.49",
+    "undici": "^8.12.4"
+  },
+  "overrides": {
+    "glob": "^14.0.2",
+    "minimatch": "^11.0.1"
   },
   "repository": {
     "type": "git",

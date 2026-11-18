@@ -1,9 +1,9 @@
 const assert = require("assert");
-const uuid = require("uuid");
+const { randomUUID: uuidv4 } = require("crypto");
 const { debug } = require("../js/common.js");
 const fs = require("fs");
 
-const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody } = require("./common.js");
+const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody, expectRequestError } = require("./common.js");
 const { beforeEach } = require("mocha");
 
 exports = module.exports = function (httpClient, type) {
@@ -16,7 +16,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey ] = Array.from({ length: 2 }, () => uuid.v4());
+        const [resourceKey, attachmentKey ] = Array.from({ length: 2 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
 
         const responsePut = await httpClient.put({ path: resourceHref, body});
@@ -64,7 +64,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey ] = Array.from({ length: 2 }, () => uuid.v4());
+        const [resourceKey, attachmentKey ] = Array.from({ length: 2 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
         const attachmentUrl =
           type + "/" + resourceKey + "/attachments/profile.png";
@@ -103,7 +103,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
 
         const responsePut = await httpClient.put({ path: resourceHref, body });
@@ -147,7 +147,6 @@ exports = module.exports = function (httpClient, type) {
         // Check if (only) the two expected attachments are there
         const responseGet2 = await httpClient.get({ path: type + "/" + resourceKey });
         assert.equal(responseGet2.status, 200);
-        console.log(responseGet2.body.attachments.length, 2);
 
         const getStream1 = await doGetStream(
           httpClient,
@@ -181,7 +180,8 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3 ] = Array.from({ length: 4 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3] =
+          Array.from({ length: 4 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
 
         const responsePut = await httpClient.put({ path: resourceHref, body });
@@ -222,26 +222,15 @@ exports = module.exports = function (httpClient, type) {
         ];
 
         // We expect an error because we are reputting an existing filename with another key.
-        // Alas, because currently sri4node streaming input requests generate streaming output
-        // the only way to signal an error to client is to reset the connection and write an
-        // errormessage in the partial body.
-        //  (checking for a scenario like this earlier in the flow, in the beforeStreaming handler
-        //   which can set the status code returned in the header, is not possible as busboy
-        //   is not yet initialised and thus the body of the request is not yet read)
-
-        let catchedErr;
-        try {
-          const basePath = resourceHref.substring(0, resourceHref.lastIndexOf("/"));
-          await doPutFiles(httpClient, basePath, filesToPut3);
-        } catch (err) {
-          catchedErr = err;
-        }
-        assert.equal(catchedErr !== null, true, 'expected a http error');
-        assert.equal((catchedErr).err.code, 'UND_ERR_SOCKET', 'expected a connection reset error');
-
-        const partialBody = catchedErr.partialBody.toString();
-        assert.equal(partialBody.includes('"status": 409'), true, 'expected status code 409 conflict in partial body');
-        assert.equal(partialBody.includes('"code": "file.already.exists"'), true, 'expected error code file.already.exists in partial body');
+        const basePath = resourceHref.substring(
+          0,
+          resourceHref.lastIndexOf("/")
+        );
+        await expectRequestError(
+          () => doPutFiles(httpClient, basePath, filesToPut3),
+          409,
+          "file.already.exists"
+        );
       });
 
       it("invalid combination of copy and upload properties should give an error", async () => {
@@ -250,7 +239,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
 
         const responsePut = await httpClient.put({ path: resourceHref, body });
@@ -284,15 +273,11 @@ exports = module.exports = function (httpClient, type) {
         await uploadFilesAndCheck(httpClient, filesToPut);
         const href = filesToPut[0].resourceHref;
         const basePath = href.substring(0, href.lastIndexOf("/"));
-        try {
-          await doPutFiles(httpClient, basePath, filesToPutInvalid);
-          assert.fail('An error is expected !');
-        } catch (err) {
-          assert.equal(err.code, 'streaming.body.read.failed');
-          const partialBodyStr = err.partialBody.toString();
-          assert.equal(partialBodyStr.includes('"status": 400'), true, 'expected status code 400 missing in partial body');
-          assert.equal(partialBodyStr.includes('"code": "upload.and.copy.mix"'), true, 'expected error code missing in partial body');
-        }
+        await expectRequestError(
+          () => doPutFiles(httpClient, basePath, filesToPutInvalid),
+          400,
+          "upload.and.copy.mix"
+        );
       });
 
       it("should allow adding an attachment with special characters (eg ¨) in the filename", async () => {
@@ -301,7 +286,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey] = Array.from({ length: 2 }, () => uuid.v4());
+        const [resourceKey, attachmentKey] = Array.from({ length: 2 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
 
         const responsePut = await httpClient.put({ path: resourceHref, body });
@@ -329,7 +314,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3 ] = Array.from({ length: 4 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3 ] = Array.from({ length: 4 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
         const attachmentUrl1 =
           type + "/" + resourceKey + "/attachments/" + attachmentKey1;
@@ -402,7 +387,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3 ] = Array.from({ length: 4 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3 ] = Array.from({ length: 4 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
         const attachmentDownloadUrl1 =
           type + "/" + resourceKey + "/attachments/profile1.png";
@@ -452,7 +437,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey ] = Array.from({ length: 2 }, () => uuid.v4());
+        const [resourceKey, attachmentKey ] = Array.from({ length: 2 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
         const localFilename = "test/images/orange-boy-icon.png";
         const attachmentUrl = `${type}/${resourceKey}/attachments/${attachmentKey}`;
@@ -484,7 +469,7 @@ exports = module.exports = function (httpClient, type) {
         );
 
         // Copy resource and attachment
-        const [resourceCopyKey, attachmentCopyKey ] = Array.from({ length: 2 }, () => uuid.v4());
+        const [resourceCopyKey, attachmentCopyKey ] = Array.from({ length: 2 }, () => uuidv4());
         const resourceCopyHref = type + "/" + resourceCopyKey;
         const copyResponse = await httpClient.put({ path: resourceCopyHref, body });
         assert.equal(copyResponse.status, 201);
@@ -531,7 +516,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
         const attachmentUrl1 =
           type + "/" + resourceKey + "/attachments/profile1.png";
@@ -559,13 +544,13 @@ exports = module.exports = function (httpClient, type) {
         await uploadFilesAndCheck(httpClient, filesToPut);
 
         // Copy the resource
-        const resourceCopyKey = uuid.v4();
+        const resourceCopyKey = uuidv4();
         const resourceCopyHref = type + "/" + resourceCopyKey;
         const copyResponse = await httpClient.put({ path: resourceCopyHref, body });
         assert.equal(copyResponse.status, 201);
 
         // Copy the attachments
-        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuid.v4());
+        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuidv4());
 
         const copyAttBody = createUploadBody([
           { remotefileName: "profile1.png",
@@ -605,7 +590,7 @@ exports = module.exports = function (httpClient, type) {
           status: "active",
         };
 
-        const [resourceKey, attachmentKey1, attachmentKey2] = Array.from({ length: 4 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2] = Array.from({ length: 4 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
         const attachmentUrl1 =
           type + "/" + resourceKey + "/attachments/profile1.png";
@@ -633,13 +618,13 @@ exports = module.exports = function (httpClient, type) {
         await uploadFilesAndCheck(httpClient, filesToPut);
 
         // Copy the resource
-        const resourceCopyKey = uuid.v4();
+        const resourceCopyKey = uuidv4();
         const resourceCopyHref = type + "/" + resourceCopyKey;
         const copyResponse = await httpClient.put({ path: resourceCopyHref, body });
         assert.equal(copyResponse.status, 201);
 
         // Copy the attachments
-        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuid.v4());
+        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuidv4());
 
         const copyAttBody = createUploadBody([
           { attachmentKey: attachmentCopyKey1,
@@ -672,7 +657,7 @@ exports = module.exports = function (httpClient, type) {
       });
 
       it("copy attachments without fileHref should result in proper error", async () => {
-        const [ resourceCopyKey, attachmentCopyKey1] = Array.from({ length: 2 }, () => uuid.v4());
+        const [ resourceCopyKey, attachmentCopyKey1] = Array.from({ length: 2 }, () => uuidv4());
         const resourceCopyHref = type + "/" + resourceCopyKey;
 
         const copyAttBody = createUploadBody([
@@ -686,9 +671,6 @@ exports = module.exports = function (httpClient, type) {
           path: `${type}/attachments/copy`,
           body: copyAttBody,
         });
-        console.log(copyAttResult.status);
-        console.log(copyAttResult.body);
-
         assert.equal(copyAttResult.status, 400);
         assert.equal(
           copyAttResult.body.errors[0].code,
@@ -701,9 +683,6 @@ exports = module.exports = function (httpClient, type) {
           path: `${type}/attachments/copy`,
           body: undefined,
         });
-
-        console.log(copyAttResult.status);
-        console.log(copyAttResult.body);
 
         assert.equal(copyAttResult.status, 400);
         assert.equal(
@@ -718,7 +697,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
         const attachmentUrl1 =
           type + "/" + resourceKey + "/attachments/profile1.png";
@@ -746,13 +725,13 @@ exports = module.exports = function (httpClient, type) {
         await uploadFilesAndCheck(httpClient, filesToPut);
 
         // Copy the resource
-        const resourceCopyKey = uuid.v4();
+        const resourceCopyKey = uuidv4();
         const resourceCopyHref = type + "/" + resourceCopyKey;
         const copyResponse = await httpClient.put({ path: resourceCopyHref, body });
         assert.equal(copyResponse.status, 201);
 
         // Copy the attachments
-        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuid.v4());
+        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuidv4());
 
         const copyAttBody = createUploadBody([
           { remotefileName: "profile1.png",
@@ -787,7 +766,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
         const attachmentUrl1 =
           type + "/" + resourceKey + "/attachments/profile1.png";
@@ -815,13 +794,13 @@ exports = module.exports = function (httpClient, type) {
         await uploadFilesAndCheck(httpClient, filesToPut);
 
         // Copy the resource
-        const resourceCopyKey = uuid.v4();
+        const resourceCopyKey = uuidv4();
         const resourceCopyHref = type + "/" + resourceCopyKey;
         const copyResponse = await httpClient.put({ path: resourceCopyHref, body });
         assert.equal(copyResponse.status, 201);
 
         // Copy the attachments
-        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuid.v4());
+        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuidv4());
 
         const copyAttBody = createUploadBody([
           { remotefileName: "profile1.png",
@@ -873,7 +852,7 @@ exports = module.exports = function (httpClient, type) {
           name: "test user",
           status: "active",
         };
-        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuid.v4());
+        const [resourceKey, attachmentKey1, attachmentKey2 ] = Array.from({ length: 3 }, () => uuidv4());
         const resourceHref = type + "/" + resourceKey;
         const attachmentUrl1 =
           type + "/" + resourceKey + "/attachments/profile1.png";
@@ -901,13 +880,13 @@ exports = module.exports = function (httpClient, type) {
         await uploadFilesAndCheck(httpClient, filesToPut);
 
         // Copy the resource
-        const resourceCopyKey = uuid.v4();
+        const resourceCopyKey = uuidv4();
         const resourceCopyHref = type + "/" + resourceCopyKey;
         const copyResponse = await httpClient.put({ path: resourceCopyHref, body });
         assert.equal(copyResponse.status, 201);
 
         // Copy the attachments
-        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuid.v4());
+        const [attachmentCopyKey1, attachmentCopyKey2 ] = Array.from({ length: 2 }, () => uuidv4());
 
         const copyAttBody = createUploadBody([
           { remotefileName: "profile1.png",
@@ -928,7 +907,7 @@ exports = module.exports = function (httpClient, type) {
         assert.equal(copyAttResult.status, 200);
 
         // same name, different attachment key
-        const attachmentCopyKey3 = uuid.v4();
+        const attachmentCopyKey3 = uuidv4();
         const copyAttBody2 = createUploadBody([
           { remotefileName: "profile1.png",
             attachmentKey: attachmentCopyKey3,
@@ -960,7 +939,7 @@ exports = module.exports = function (httpClient, type) {
           status: "active",
         };
         const [resourceKey, attachmentKey1] = Array.from({ length: 4 }, () =>
-          uuid.v4()
+          uuidv4()
         );
         resourceHref = type + "/" + resourceKey;
 

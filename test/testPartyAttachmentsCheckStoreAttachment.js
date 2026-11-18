@@ -1,5 +1,5 @@
 const assert = require("assert");
-const uuid = require("uuid");
+const { randomUUID: uuidv4 } = require("crypto");
 const { debug } = require("../js/common.js");
 const { SriError } = require("sri4node");
 
@@ -191,13 +191,13 @@ exports = module.exports = {
               name: "test user",
               status: "active",
             };
-            const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3, attachmentKey4] = Array.from({ length: 5 }, () => uuid.v4());
+            const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3, attachmentKey4] = Array.from({ length: 5 }, () => uuidv4());
             const resourceHref = type + "/" + resourceKey;
             const attachmentDownloadUrl1 = type + "/" + resourceKey + "/attachments/profile1_*__.png";
             const attachmentDownloadUrl2 = type + "/" + resourceKey + "/attachments/profile2.png";
             const attachmentDownloadUrl3 = type + "/" + resourceKey + "/attachments/profile3.png";
             const attachmentDownloadUrl4 = type + "/" + resourceKey + "/attachments/profile4.png";
-            const [attachmentKey1b, attachmentKey2b, attachmentKey3b, attachmentKey4b] = Array.from({ length: 4 }, () => uuid.v4());
+            const [attachmentKey1b, attachmentKey2b, attachmentKey3b, attachmentKey4b] = Array.from({ length: 4 }, () => uuidv4());
 
             const response = await httpClient.put({ path: resourceHref, body });
             assert.equal(response.status, 201);
@@ -278,13 +278,13 @@ exports = module.exports = {
               name: "test user",
               status: "active",
             };
-            const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3, attachmentKey4] = Array.from({ length: 5 }, () => uuid.v4());
+            const [resourceKey, attachmentKey1, attachmentKey2, attachmentKey3, attachmentKey4] = Array.from({ length: 5 }, () => uuidv4());
             const resourceHref = type + "/" + resourceKey;
             const attachmentDownloadUrl1 = type + "/" + resourceKey + "/attachments/profile1_*__.png";
             const attachmentDownloadUrl2 = type + "/" + resourceKey + "/attachments/profile2.png";
             const attachmentDownloadUrl3 = type + "/" + resourceKey + "/attachments/profile3.png";
             const attachmentDownloadUrl4 = type + "/" + resourceKey + "/attachments/profile4.png";
-            const [attachmentKey1b, attachmentKey2b, attachmentKey3b, attachmentKey4b] = Array.from({ length: 4 }, () => uuid.v4());
+            const [attachmentKey1b, attachmentKey2b, attachmentKey3b, attachmentKey4b] = Array.from({ length: 4 }, () => uuidv4());
 
             const response = await httpClient.put({ path: resourceHref, body });
             assert.equal(response.status, 201);

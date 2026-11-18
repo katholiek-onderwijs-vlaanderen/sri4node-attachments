@@ -319,10 +319,10 @@ async function checkUploadedFiles(httpClient, filesToPut) {
     const getStream = await doGetStream(httpClient, url);
 
     if (localFilename) {
-      console.log(`Comparing get result with local file ${localFilename}`);
+      // console.log(`Comparing get result with local file ${localFilename}`);
       await checkStreamEqual(getStream, fs.createReadStream(localFilename));
     } else if (urlToCopy) {
-      console.log(`Comparing get result with source url ${urlToCopy}`);
+      // console.log(`Comparing get result with source url ${urlToCopy}`);
       await checkStreamEqual(getStream, await doGetStream(httpClient, urlToCopy));
     }
   }
@@ -352,7 +352,6 @@ async function uploadFilesAndCheck(httpClient, filesToPut) {
   // are downloadable
   const responseGet = await httpClient.get({ path: resourceHref });
   assert.equal(responseGet.status, 200);
-  console.log(responseGet.body.attachments.length, filesToPut.length);
   for (const href of responseGet.body.attachments.map((a) => a.href)) {
     try {
       const responseGetA = await httpClient.get({ path: href });
@@ -394,6 +393,68 @@ async function copyFilesAndCheck(httpClient, filesToPut) {
   }
 }
 
+/**
+ * Converts the partialBody of a streaming error to a string
+ * (it can be a Buffer, an array of bytes, or a string).
+ * @param {any} partialBody
+ * @returns {string}
+ */
+function partialBodyToString(partialBody) {
+  if (partialBody === undefined || partialBody === null) return "";
+  if (typeof partialBody === "string") return partialBody;
+  if (Buffer.isBuffer(partialBody)) return partialBody.toString("utf8");
+  if (Array.isArray(partialBody)) {
+    // could be an array of bytes or an array of Buffers
+    return partialBody.every((b) => typeof b === "number")
+      ? Buffer.from(partialBody).toString("utf8")
+      : Buffer.concat(partialBody.map((b) => Buffer.from(b))).toString("utf8");
+  }
+  return String(partialBody);
+}
+
+/**
+ * Expects a request to fail with the given status and error code.
+ * Accepts both:
+ *  - a proper error response (status + JSON body with errors[])
+ *  - a connection reset after the headers were sent (streaming.body.read.failed),
+ *    in which case the error code must appear in the partial body
+ *
+ * @param {() => Promise<any>} doRequest function that performs the request
+ * @param {number} expectedStatus
+ * @param {string} expectedCode
+ */
+async function expectRequestError(doRequest, expectedStatus, expectedCode) {
+  let response;
+  let body;
+  try {
+    response = await doRequest();
+    // reading the body can also fail when the server closes the connection
+    body =
+      response.body && typeof response.body.json === "function"
+        ? await response.body.json()
+        : response.body;
+  } catch (e) {
+    if (e && e.code === "streaming.body.read.failed") {
+      const text = partialBodyToString(e.partialBody);
+      assert.ok(
+        text.includes(expectedCode),
+        `expected error code '${expectedCode}' in partial body, got: ${text.slice(0, 500)}`
+      );
+      return;
+    }
+    throw e;
+  }
+
+  assert.equal(
+    response.status,
+    expectedStatus,
+    `expected status ${expectedStatus}, got ${response.status}: ${JSON.stringify(body)}`
+  );
+  assert.ok(
+    body && Array.isArray(body.errors) && body.errors.some((err) => err.code === expectedCode),
+    `expected error code '${expectedCode}', got ${JSON.stringify(body)}`
+  );
+}
 
 exports = module.exports = {
   doGetStream,
@@ -403,4 +464,5 @@ exports = module.exports = {
   deleteAttachmentAndVerify,
   uploadFilesAndCheck,
   copyFilesAndCheck,
+  expectRequestError,
 };
