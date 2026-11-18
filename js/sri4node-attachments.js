@@ -1592,13 +1592,16 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * sriConfig.resources.*.customRoutes in order to add a GET
    * /resource/attachments/<filename> route to download an attachment.
    *
+   * Any filename is accepted (with or without extension), except a string that looks like
+   * a uuid (36 chars of hex digits and dashes), because that path is handled by customRouteForGet.
+   *
    * @param { TCheckDownloadFun } checkDownload
    * @param { TGetCacheHeadersFun } getCacheHeaders
    * @returns {TCustomRoute}
    */
   function customRouteForDownload(checkDownload, getCacheHeaders) {
     return {
-      routePostfix: "/:key/attachments/:filename([^/]*\\.[A-Za-z0-9]{1,})",
+      routePostfix: "/:key/attachments/:filename([^/]{0,}[^/0-9a-fA-F-][^/]{0,}|[^/]{1,35}|[^/]{37,})",
       httpMethods: ["GET"],
       readOnly: true,
       binaryStream: true,

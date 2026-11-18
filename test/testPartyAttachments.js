@@ -551,6 +551,52 @@ exports = module.exports = function (httpClient, type) {
         assert.match(String(res.headers["content-type"]), /image\/png/);
         assert.match(String(res.headers["content-disposition"] ?? ""), /profile\.png/);
       });
+
+      it("downloads an attachment without extension", async () => {
+        const resourceKey = uuidv4();
+        const resourceHref = `${type}/${resourceKey}`;
+        await httpClient.put({
+          path: resourceHref,
+          body: { type: "person", name: "test user", status: "active" },
+        });
+        await uploadFilesAndCheck(httpClient, [
+          {
+            remotefileName: "README",
+            localFilename: "test/images/orange-boy-icon.png",
+            attachmentKey: uuidv4(),
+            resourceHref,
+          },
+        ]);
+        const res = await httpClient.get({
+          path: `${resourceHref}/attachments/README`,
+          streaming: true,
+        });
+        assert.equal(res.status, 200);
+        assert.match(String(res.headers["content-disposition"] ?? ""), /README/);
+      });
+
+      it("still routes a uuid to customRouteForGet (json, not a file)", async () => {
+        const resourceKey = uuidv4();
+        const attachmentKey = uuidv4();
+        const resourceHref = `${type}/${resourceKey}`;
+        await httpClient.put({
+          path: resourceHref,
+          body: { type: "person", name: "test user", status: "active" },
+        });
+        await uploadFilesAndCheck(httpClient, [
+          {
+            remotefileName: "profile.png",
+            localFilename: "test/images/orange-boy-icon.png",
+            attachmentKey,
+            resourceHref,
+          },
+        ]);
+        const res = await httpClient.get({
+          path: `${resourceHref}/attachments/${attachmentKey}`,
+        });
+        assert.equal(res.status, 200);
+        assert.equal(res.body.key, attachmentKey);
+      });
     });
 
     describe("customRouteForUploadCopy", function () {
