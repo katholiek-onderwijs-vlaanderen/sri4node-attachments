@@ -1601,7 +1601,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    */
   function customRouteForDownload(checkDownload, getCacheHeaders) {
     return {
-      routePostfix: "/:key/attachments/:filename([^/]{0,}[^/0-9a-fA-F-][^/]{0,}|[^/]{1,35}|[^/]{37,})",
+      routePostfix: "/:key/attachments/:filename([0-9a-fA-F-]{0,}[^/0-9a-fA-F-][^/]{0,}|[^/]{1,35}|[^/]{37,})",
       httpMethods: ["GET"],
       readOnly: true,
       binaryStream: true,
