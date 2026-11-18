@@ -502,6 +502,11 @@ async function expectRequestError(doRequest, expectedStatus, expectedCode) {
       const text = partialBodyToString(e.partialBody);
       const parsed = parseErrorJsonFromPartialBody(text);
       if (parsed !== undefined) {
+        assert.equal(
+          normalizeErrorBody(parsed)?.status,
+          expectedStatus,
+          "partial body: unexpected or missing status"
+        );
         assertErrorBody(parsed, expectedStatus, expectedCode, "partial body");
         return;
       }
