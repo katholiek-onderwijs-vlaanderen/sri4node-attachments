@@ -208,7 +208,6 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment, c
       (_tx, _sriRequest, data) => {
         data.forEach(({ permalink, stored }) => {
           const resourceKey = permalink.split("/").pop();
-          console.log(permalink);
           stored.attachments = Object.entries(resourceMap[resourceKey]).map(
             ([attachmentKey, attFile]) => {
               return attachmentJson(attFile, resourceKey, attachmentKey);

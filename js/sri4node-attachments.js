@@ -3,7 +3,7 @@ const S3 = require("@aws-sdk/client-s3");
 const { Upload } = require("@aws-sdk/lib-storage");
 const S3PresignedPost = require("@aws-sdk/s3-presigned-post");
 const mime = require("mime-types");
-const { v4: uuidv4 } = require("uuid");
+const { randomUUID: uuidv4 } = require("crypto");
 const { pipeline } = require("stream");
 const { promisify } = require("util");
 
@@ -146,7 +146,6 @@ function getSafeFilename(filename) {
  *      runAfterUpload: TRunAfterUploadFun,
  *      getResourceForCopy?: TGetResourceForCopyFun,
  *    ) => TCustomRoute,
- *    customRouteForPreSignedUpload: () => TCustomRoute,
  *    customRouteForDownload: (
  *      checkDownload?: TCheckDownloadFun
  *    ) => TCustomRoute,
@@ -167,7 +166,9 @@ function getSafeFilename(filename) {
  * @returns { Promise<TSri4NodeAttachmentUtils> }
  */
 async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
-  const logChannel = "sri4node-attachments";
+
+  const { errorToLogObject } = sri4node;
+  const logChannel = /** @type {const} */ ("sri4node-attachments");
 
   // default configuration
   const fullPluginConfig = {
@@ -187,12 +188,17 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   };
 
   function debug(s) {
-    sri4node.debug("attachments", s);
+    sri4node.debug(logChannel, s);
+  }
+
+  function errorReq(s) {
+    sri4node.debug("error", s);
   }
 
   function error(s) {
-    sri4node.error("attachments", s);
+    sri4node.error(s);
   }
+
 
   /**
    * This method is stateful, as it will cache and return a previously existing client
@@ -257,8 +263,13 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   async function checkOrCreateBucket() {
     const exists = await checkBucket(fullPluginConfig.s3bucket);
     if (!exists && !fullPluginConfig.createBucketIfNotExists) {
-      error(`S3 Bucket ${fullPluginConfig.s3bucket} does not exist`);
-      error(fullPluginConfig);
+      const { endpoint, s3bucket, s3region } = fullPluginConfig;
+      error({
+        msg: "[checkOrCreateBucket] bucket does not exist and createBucketIfNotExists is false",
+        endpoint,
+        s3bucket,
+        s3region,
+      });
     }
 
     if (!exists && fullPluginConfig.createBucketIfNotExists) {
@@ -273,10 +284,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           },
         });
         await awss3.send(s3cmd);
-      } catch (ex) {
-        error(`[checkOrCreateBucket] bucket creation failed with error: ${ex}`);
-        debug(ex);
-        throw ex;
+      } catch (err) {
+        error({
+          msg: "[checkOrCreateBucket] bucket creation failed with error",
+          error: errorToLogObject(err),
+        });
+        throw err;
       }
     }
   }
@@ -352,6 +365,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
       // Use pipeline with proper cleanup - it handles most edge cases automatically
       try {
+        // the response already carries several 'close' listeners (express, compression,
+        // sri4node); pipeline adds a few more, which exceeds Node's default limit of 10
+        if (typeof outstream.getMaxListeners === "function") {
+          outstream.setMaxListeners(Math.max(outstream.getMaxListeners(), 20));
+        }
         // @ts-ignore - AWS SDK stream types
         await pipelineAsync(stream, outstream);
         debug("[downloadFromS3] Finished download of file.");
@@ -363,13 +381,17 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         }
 
         const msg = "[downloadFromS3] error during stream pipeline";
-        error(msg);
-        error(err);
+        errorReq({
+          msg,
+          error: errorToLogObject(err),
+        });
         throw new Error(`500 ${msg}`);
       }
     } catch (err) {
-      error("[downloadFromS3] the download failed:");
-      error(err);
+      errorReq({
+        msg: "[downloadFromS3] the download failed with error",
+        error: errorToLogObject(err),
+      });
       if (err.$metadata?.httpStatusCode) {
         throw err.$metadata.httpStatusCode;
       } else {
@@ -393,8 +415,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         Objects: objects,
       },
     };
-    const response = await awss3.send(new S3.DeleteObjectsCommand(params));
-    console.log(response);
+    const result = await awss3.send(new S3.DeleteObjectsCommand(params));
+    debug(`[deleteFromS3] deleted ${result.Deleted?.length ?? 0} object(s)`);
   }
 
   /**
@@ -608,8 +630,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     try {
       await deleteFromS3([remoteFilename]);
     } catch (err) {
-      error(`Unable to delete file [${remoteFilename}]`);
-      error(err);
+      errorReq({
+        msg: `Unable to delete file [${remoteFilename}]`,
+        error: errorToLogObject(err),
+      });
       throw new sriRequest.SriError({
         status: 500,
         errors: [
@@ -623,22 +647,22 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
   }
 
-  /**
-   *
-   * @returns {Promise<S3PresignedPost.PresignedPost>}
-   */
-  async function getPreSigned() {
-    debug("getting presigned post for s3");
+  // /**
+  //  *
+  //  * @returns {Promise<S3PresignedPost.PresignedPost>}
+  //  */
+  // async function getPreSigned() {
+  //   debug("getting presigned post for s3");
 
-    const awss3 = getAWSS3Client();
+  //   const awss3 = getAWSS3Client();
 
-    return await S3PresignedPost.createPresignedPost(awss3, {
-      Bucket: fullPluginConfig.s3bucket,
-      Conditions: [["starts-with", "$key", "tmp"]],
-      // some kind of random tmp key?
-      Key: `tmp${Math.round(Math.random() * 9999999)}`,
-    });
-  }
+  //   return await S3PresignedPost.createPresignedPost(awss3, {
+  //     Bucket: fullPluginConfig.s3bucket,
+  //     Conditions: [["starts-with", "$key", "tmp"]],
+  //     // some kind of random tmp key?
+  //     Key: `tmp${Math.round(Math.random() * 9999999)}`,
+  //   });
+  // }
 
   /**
    * Calls the security server to verify if a specified ability is allowed on the specified attachments.
@@ -1321,13 +1345,14 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
        */
       streamingHandler: async (tx, sriRequest, stream, _internalUtils) => {
         let copiedAttachmentsWithFileObj = [];
-        let uploadedAttachmentsWithFileObj = [];
         let allAttachmentsWithFileObj = [];
         let allAttachmentsToHandle = [];
+        let attachmentsRcvd = [];
 
         try {
-          const { attachmentsRcvd, fieldsRcvd } =
-            await receiveFilesAndMetadataFromBusboyAndUploadToS3(sriRequest);
+          let fieldsRcvd;
+          ({ attachmentsRcvd, fieldsRcvd } =
+            await receiveFilesAndMetadataFromBusboyAndUploadToS3(sriRequest));
 
           throwErrorWhenBodyIsMissing(fieldsRcvd.body, sriRequest);
 
@@ -1349,7 +1374,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           );
 
           // copy attachments in case there are fileHrefs in the multipart
-          const copiedAttachmentsWithFileObj = await copyAttachments(
+          copiedAttachmentsWithFileObj = await copyAttachments(
             tx,
             sriRequest,
             safeBodyJsonArray.filter((e) => e.fileHref),
@@ -1396,8 +1421,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           // all files are now uploaded into their TMP versions.
         } catch (err) {
           await handleErrorDuringUploadOrCopy(err, sriRequest, [
-            ...copiedAttachmentsWithFileObj,
-            ...uploadedAttachmentsWithFileObj,
+            ...copiedAttachmentsWithFileObj.map((e) => e.fileObj),
+            ...attachmentsRcvd,
           ]);
         }
         /// all went well, rename the files to their real names now.
@@ -1502,7 +1527,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           await handleErrorDuringUploadOrCopy(
             err,
             sriRequest,
-            copiedAttachmentsWithFileObj
+            copiedAttachmentsWithFileObj.map((e) => e.fileObj)
           );
         }
 
@@ -1520,52 +1545,55 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     };
   }
 
-  /**
-   * A function that will generate a json object that can be used in
-   * sriConfig.resources.*.customRoutes in order to add a GET
-   * /resource/attachments/prsegignedupload route.
-   * This is something specific to upload a file directly to S3 or something
-   * (without proxying through the api server) by requesting some kind of token first
-   * and then using that to be allowed to upload something directly to S3.
-   *
-   * [ Currently not used ]
-   *
-   * @returns {TCustomRoute}
-   */
-  function customRouteForPreSignedUpload() {
-    return {
-      routePostfix: "/attachments/presigned",
-      httpMethods: ["GET"],
-      readOnly: true,
-      /**
-       * @type { TNonStreamingCustomRoute['beforeHandler'] }
-       */
-      beforeHandler: async (
-        _tx,
-        _sriRequest,
-        _customMapping,
-        _internalUtils
-      ) => {
-        // await checkSecurity(tx, sriRequest, null, 'create');
-      },
-      /**
-       * @type { TNonStreamingCustomRoute['handler'] }
-       */
-      handler: async (_tx, _sriRequest, _customMapping, _internalUtils) => {
-        /// do the presigned request to s3
-        const json = await getPreSigned();
-        return {
-          body: json,
-          status: 200,
-        };
-      },
-    };
-  }
+  // /**
+  //  * A function that will generate a json object that can be used in
+  //  * sriConfig.resources.*.customRoutes in order to add a GET
+  //  * /resource/attachments/prsegignedupload route.
+  //  * This is something specific to upload a file directly to S3 or something
+  //  * (without proxying through the api server) by requesting some kind of token first
+  //  * and then using that to be allowed to upload something directly to S3.
+  //  *
+  //  * [ Currently not used ]
+  //  *
+  //  * @returns {TCustomRoute}
+  //  */
+  // function customRouteForPreSignedUpload() {
+  //   return {
+  //     routePostfix: "/attachments/presigned",
+  //     httpMethods: ["GET"],
+  //     readOnly: true,
+  //     /**
+  //      * @type { TNonStreamingCustomRoute['beforeHandler'] }
+  //      */
+  //     beforeHandler: async (
+  //       _tx,
+  //       _sriRequest,
+  //       _customMapping,
+  //       _internalUtils
+  //     ) => {
+  //       // await checkSecurity(tx, sriRequest, null, 'create');
+  //     },
+  //     /**
+  //      * @type { TNonStreamingCustomRoute['handler'] }
+  //      */
+  //     handler: async (_tx, _sriRequest, _customMapping, _internalUtils) => {
+  //       /// do the presigned request to s3
+  //       const json = await getPreSigned();
+  //       return {
+  //         body: json,
+  //         status: 200,
+  //       };
+  //     },
+  //   };
+  // }
 
   /**
    * A function that will generate a json object that can be used in
    * sriConfig.resources.*.customRoutes in order to add a GET
    * /resource/attachments/<filename> route to download an attachment.
+   *
+   * Any filename is accepted (with or without extension), except a string that looks like
+   * a uuid (36 chars of hex digits and dashes), because that path is handled by customRouteForGet.
    *
    * @param { TCheckDownloadFun } checkDownload
    * @param { TGetCacheHeadersFun } getCacheHeaders
@@ -1573,7 +1601,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    */
   function customRouteForDownload(checkDownload, getCacheHeaders) {
     return {
-      routePostfix: "/:key/attachments/:filename([^/]*.[A-Za-z0-9]{1,})",
+      routePostfix: "/:key/attachments/:filename([0-9a-fA-F-]{0,}[^/0-9a-fA-F-][^/]{0,}|[^/]{1,35}|[^/]{37,})",
       httpMethods: ["GET"],
       readOnly: true,
       binaryStream: true,
@@ -1714,7 +1742,6 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   return {
     customRouteForUpload,
     customRouteForUploadCopy,
-    customRouteForPreSignedUpload,
     customRouteForDownload,
     customRouteForDelete,
     customRouteForGet,

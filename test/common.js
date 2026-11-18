@@ -1,4 +1,5 @@
 /*global Buffer*/
+const { ListObjectsV2Command, S3Client } = require("@aws-sdk/client-s3");
 const assert = require("assert");
 const FormData = require('form-data');
 const fs = require("fs");
@@ -319,10 +320,10 @@ async function checkUploadedFiles(httpClient, filesToPut) {
     const getStream = await doGetStream(httpClient, url);
 
     if (localFilename) {
-      console.log(`Comparing get result with local file ${localFilename}`);
+      // console.log(`Comparing get result with local file ${localFilename}`);
       await checkStreamEqual(getStream, fs.createReadStream(localFilename));
     } else if (urlToCopy) {
-      console.log(`Comparing get result with source url ${urlToCopy}`);
+      // console.log(`Comparing get result with source url ${urlToCopy}`);
       await checkStreamEqual(getStream, await doGetStream(httpClient, urlToCopy));
     }
   }
@@ -352,7 +353,6 @@ async function uploadFilesAndCheck(httpClient, filesToPut) {
   // are downloadable
   const responseGet = await httpClient.get({ path: resourceHref });
   assert.equal(responseGet.status, 200);
-  console.log(responseGet.body.attachments.length, filesToPut.length);
   for (const href of responseGet.body.attachments.map((a) => a.href)) {
     try {
       const responseGetA = await httpClient.get({ path: href });
@@ -394,6 +394,171 @@ async function copyFilesAndCheck(httpClient, filesToPut) {
   }
 }
 
+/**
+ * Converts the partialBody of a streaming error to a string
+ * (it can be a Buffer, an array of bytes, or a string).
+ * @param {any} partialBody
+ * @returns {string}
+ */
+function partialBodyToString(partialBody) {
+  if (partialBody === undefined || partialBody === null) return "";
+  if (typeof partialBody === "string") return partialBody;
+  if (Buffer.isBuffer(partialBody)) return partialBody.toString("utf8");
+  if (Array.isArray(partialBody)) {
+    // could be an array of bytes or an array of Buffers
+    return partialBody.every((b) => typeof b === "number")
+      ? Buffer.from(partialBody).toString("utf8")
+      : Buffer.concat(partialBody.map((b) => Buffer.from(b))).toString("utf8");
+  }
+  return String(partialBody);
+}
+
+/**
+ * Escapes a string for literal use inside a RegExp.
+ * @param {string} s
+ */
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Tries to extract the JSON error object that sri4node writes into the stream
+ * (possibly preceded by padding like "\n\n\n____").
+ * @param {string} text
+ * @returns {any | undefined}
+ */
+function parseErrorJsonFromPartialBody(text) {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) return undefined;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Normalizes an error body: sri4node can return either { errors, status }
+ * or a wrapped SriError { status, body: { errors, status } }.
+ * @param {any} body
+ * @returns {{ status?: number, errors?: any[] } | undefined}
+ */
+function normalizeErrorBody(body) {
+  if (!body || typeof body !== "object") return undefined;
+  if (Array.isArray(body.errors)) return body;
+  if (body.body && typeof body.body === "object" && Array.isArray(body.body.errors)) {
+    return { status: body.status ?? body.body.status, errors: body.body.errors };
+  }
+  return body;
+}
+
+
+/**
+ * Checks that the (parsed) error body contains exactly the expected code and status.
+ * @param {any} rawBody
+ * @param {number} expectedStatus
+ * @param {string} expectedCode
+ * @param {string} context
+ */
+function assertErrorBody(rawBody, expectedStatus, expectedCode, context) {
+  const body = normalizeErrorBody(rawBody);
+  assert.ok(
+    body && Array.isArray(body.errors),
+    `${context}: expected an errors array, got ${JSON.stringify(rawBody)}`
+  );
+  const codes = body.errors.map((e) => e.code);
+  assert.ok(
+    codes.includes(expectedCode),
+    `${context}: expected error code '${expectedCode}', got [${codes.join(", ")}]`
+  );
+  if (body.status !== undefined) {
+    assert.equal(body.status, expectedStatus, `${context}: unexpected status in body`);
+  }
+}
+
+/**
+ * Expects a request to fail with the given status and error code.
+ * Accepts both:
+ *  - a proper error response (status + JSON body with errors[])
+ *  - a connection reset after the headers were sent (streaming.body.read.failed),
+ *    in which case the error code must appear in the partial body
+ *
+ * @param {() => Promise<any>} doRequest function that performs the request
+ * @param {number} expectedStatus
+ * @param {string} expectedCode
+ */
+async function expectRequestError(doRequest, expectedStatus, expectedCode) {
+  let response;
+  let body;
+  try {
+    response = await doRequest();
+    // reading the body can also fail when the server closes the connection
+    body =
+      response.body && typeof response.body.json === "function"
+        ? await response.body.json()
+        : response.body;
+  } catch (e) {
+    if (e && e.code === "streaming.body.read.failed") {
+      const text = partialBodyToString(e.partialBody);
+      const parsed = parseErrorJsonFromPartialBody(text);
+      if (parsed !== undefined) {
+        assert.equal(
+          normalizeErrorBody(parsed)?.status,
+          expectedStatus,
+          "partial body: unexpected or missing status"
+        );
+        assertErrorBody(parsed, expectedStatus, expectedCode, "partial body");
+        return;
+      }
+
+      // fallback when the JSON is truncated: require an exact "code" field and status field
+      const codeRe = new RegExp(`"code"\\s*:\\s*"${escapeRegExp(expectedCode)}"`);
+      const statusRe = new RegExp(`"status"\\s*:\\s*${expectedStatus}(?!\\d)`);
+      assert.ok(
+        codeRe.test(text),
+        `expected exact error code '${expectedCode}' in partial body, got: ${text.slice(0, 500)}`
+      );
+      assert.ok(
+        statusRe.test(text),
+        `expected status ${expectedStatus} in partial body, got: ${text.slice(0, 500)}`
+      );
+      return;
+    }
+    throw e;
+  }
+
+  assert.equal(
+    response.status,
+    expectedStatus,
+    `expected status ${expectedStatus}, got ${response.status}: ${JSON.stringify(body)}`
+  );
+  const parsedBody = typeof body === "string" ? JSON.parse(body) : body;
+  assertErrorBody(parsedBody, expectedStatus, expectedCode, "response body");
+}
+
+/**
+ * Lists the keys of all .tmp objects in the test bucket.
+ * @returns {Promise<string[]>}
+ */
+async function listTmpObjects() {
+  const s3 = new S3Client({
+    endpoint: "http://localhost:4566/",
+    region: "eu-west-1",
+    forcePathStyle: true,
+    credentials: { accessKeyId: "test", secretAccessKey: "test" },
+  });
+  const keys = [];
+  let ContinuationToken;
+  do {
+    const res = await s3.send(
+      new ListObjectsV2Command({ Bucket: "tests3bucket", ContinuationToken })
+    );
+    keys.push(...(res.Contents ?? []).map((o) => o.Key).filter((k) => k.endsWith(".tmp")));
+    ContinuationToken = res.NextContinuationToken;
+  } while (ContinuationToken);
+  return keys;
+}
 
 exports = module.exports = {
   doGetStream,
@@ -403,4 +568,6 @@ exports = module.exports = {
   deleteAttachmentAndVerify,
   uploadFilesAndCheck,
   copyFilesAndCheck,
+  expectRequestError,
+  listTmpObjects,
 };
