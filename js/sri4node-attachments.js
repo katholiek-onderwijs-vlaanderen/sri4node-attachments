@@ -647,22 +647,22 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
   }
 
-  /**
-   *
-   * @returns {Promise<S3PresignedPost.PresignedPost>}
-   */
-  async function getPreSigned() {
-    debug("getting presigned post for s3");
+  // /**
+  //  *
+  //  * @returns {Promise<S3PresignedPost.PresignedPost>}
+  //  */
+  // async function getPreSigned() {
+  //   debug("getting presigned post for s3");
 
-    const awss3 = getAWSS3Client();
+  //   const awss3 = getAWSS3Client();
 
-    return await S3PresignedPost.createPresignedPost(awss3, {
-      Bucket: fullPluginConfig.s3bucket,
-      Conditions: [["starts-with", "$key", "tmp"]],
-      // some kind of random tmp key?
-      Key: `tmp${Math.round(Math.random() * 9999999)}`,
-    });
-  }
+  //   return await S3PresignedPost.createPresignedPost(awss3, {
+  //     Bucket: fullPluginConfig.s3bucket,
+  //     Conditions: [["starts-with", "$key", "tmp"]],
+  //     // some kind of random tmp key?
+  //     Key: `tmp${Math.round(Math.random() * 9999999)}`,
+  //   });
+  // }
 
   /**
    * Calls the security server to verify if a specified ability is allowed on the specified attachments.
