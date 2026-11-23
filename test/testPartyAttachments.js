@@ -611,8 +611,11 @@ exports = module.exports = function (httpClient, type) {
         const res = await httpClient.get({
           path: `${resourceHref}/attachments/${attachmentKey.toUpperCase()}`,
         });
-        // handled by customRouteForGet (JSON), not by the download route
-        assert.notEqual(res.headers["content-type"], "image/png");
+        // must be handled by customRouteForGet: JSON metadata of the attachment, not the file
+        assert.equal(res.status, 200);
+        assert.match(String(res.headers["content-type"]), /application\/json/);
+        assert.equal(res.body.key, attachmentKey);
+        assert.equal(res.body.description, `this is MY file with key ${attachmentKey}`);
       });
 
     });
