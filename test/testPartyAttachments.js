@@ -597,6 +597,24 @@ exports = module.exports = function (httpClient, type) {
         assert.equal(res.status, 200);
         assert.equal(res.body.key, attachmentKey);
       });
+
+      it("routes an uppercase uuid path to customRouteForGet (express routing is case-insensitive)", async () => {
+        const resourceHref = `${type}/${uuidv4()}`;
+        await httpClient.put({
+          path: resourceHref,
+          body: { type: "person", name: "test user", status: "active" },
+        });
+        const attachmentKey = uuidv4();
+        await uploadFilesAndCheck(httpClient, [
+          { remotefileName: "profile.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey, resourceHref },
+        ]);
+        const res = await httpClient.get({
+          path: `${resourceHref}/attachments/${attachmentKey.toUpperCase()}`,
+        });
+        // handled by customRouteForGet (JSON), not by the download route
+        assert.notEqual(res.headers["content-type"], "image/png");
+      });
+
     });
 
     describe("customRouteForUploadCopy", function () {

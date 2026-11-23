@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.4.0 - 23 November 2026
+- updated libraries and adapted code accordingly
+- cleanup of temp S3 files in case of errors
+- removed obsolete and unused customRouteForPreSignedUpload function
+- fixed ambiguous customRouteForDownload url pattern, side effect is that uuid-like names (36 hex/dash characters, any case, since Express routing is case-insensitive) are no longer downloadable by name
+- a lot of new test cases
+
 ## v2.3.6 - 12 February 2026
 Added optional new parameter for customRouteForDownload: getCacheHeaders, a function that is called to allow the client to set caching headers based on sriRequest.
 
