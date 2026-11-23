@@ -641,6 +641,15 @@ exports = module.exports = function (httpClient, type) {
         const res = await httpClient.get({ path: href });
         assert.equal(res.status, 200);
         assert.equal(res.body.key, attachmentKey);
+
+        // delete via the returned href must remove metadata and file
+        const delRes = await httpClient.delete({ path: href });
+        assert.equal(delRes.status, 204);
+        assert.equal((await httpClient.get({ path: href })).status, 404);
+        assert.equal(
+          (await httpClient.get({ path: `${resourceHref}/attachments/profile.png` })).status,
+          404
+        );
       });
 
     });
