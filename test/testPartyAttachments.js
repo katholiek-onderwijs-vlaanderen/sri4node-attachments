@@ -618,6 +618,31 @@ exports = module.exports = function (httpClient, type) {
         assert.equal(res.body.description, `this is MY file with key ${attachmentKey}`);
       });
 
+      it("an attachment uploaded with an uppercase key is reachable via its returned href", async () => {
+        const resourceHref = `${type}/${uuidv4()}`;
+        await httpClient.put({
+          path: resourceHref,
+          body: { type: "person", name: "test user", status: "active" },
+        });
+        const attachmentKey = uuidv4().toUpperCase();
+        const putRes = await doPutFiles(httpClient, type, [
+          { remotefileName: "profile.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey, resourceHref },
+        ]);
+        assert.equal(putRes.status, 200);
+        // streaming route: body may come back as a string or buffer, and may be nested ([[{...}]])
+        const putBody =
+          typeof putRes.body === "string" || Buffer.isBuffer(putRes.body)
+            ? JSON.parse(putRes.body.toString())
+            : putRes.body;
+        const href = [putBody].flat(Infinity)[0]?.href;
+        assert.ok(href, `no href in upload response: ${JSON.stringify(putBody)}`);
+        assert.ok(href.endsWith(attachmentKey), `unexpected href ${href}`);
+
+        const res = await httpClient.get({ path: href });
+        assert.equal(res.status, 200);
+        assert.equal(res.body.key, attachmentKey);
+      });
+
     });
 
     describe("customRouteForUploadCopy", function () {

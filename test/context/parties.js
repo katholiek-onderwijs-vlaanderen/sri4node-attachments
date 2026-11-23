@@ -15,6 +15,12 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment, c
   const resourceMap = {};
 
   /**
+   * uuids are case-insensitive (and express routing too), so use one canonical form as map key
+   * @param {string} key
+   */
+  const normKey = (key) => String(key).toLowerCase();
+
+  /**
    * Store attachment data in a local object for testing
    * @param { import("../../js/sri4node-attachments").TMultiPartSingleBodyForAfterUploadHandler
    *          | Array<import("../../js/sri4node-attachments").TMultiPartSingleBodyForAfterUploadHandler>} file
@@ -24,7 +30,7 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment, c
       file.forEach(f => storeAttachment(f));
     } else {
       const resourceKey = file.resource.href.split("/").pop();
-      const attachmentKey = file.attachment.key;
+      const attachmentKey = normKey(file.attachment.key);
       if (resourceMap[resourceKey] === undefined) {
         resourceMap[resourceKey] = {};
       }
@@ -36,8 +42,10 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment, c
    * Create attachment JSON for testing
    * @returns
    */
-  function attachmentJson(attFile, resourceKey, attachmentKey) {
+  function attachmentJson(attFile, resourceKey) {
     const nowString = new Date().toISOString();
+    // use the stored key (as provided on upload), not the (possibly differently cased) request path
+    const attachmentKey = attFile.attachment.key;
     return {
       ...attFile.attachment,
       $$meta: {
@@ -193,9 +201,9 @@ module.exports = function (sri4node, attachments, type, customStoreAttachment, c
         resourceKey,
         attachmentKey
       ) {
-        const attFile = resourceMap[resourceKey][attachmentKey];
+        const attFile = resourceMap[resourceKey][normKey(attachmentKey)];
         if (attFile !== undefined) {
-          return attachmentJson(attFile, resourceKey, attachmentKey);
+          return attachmentJson(attFile, resourceKey);
         } else {
           throw new sriRequest.SriError({
             status: 404,

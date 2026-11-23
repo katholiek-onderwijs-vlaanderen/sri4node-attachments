@@ -1782,8 +1782,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           tx,
           sriRequest,
           sriRequest.params.key,
-          // express routing is case-insensitive, uuids are too: normalize before lookup
-          String(sriRequest.params.attachmentKey).toLowerCase(),
+          sriRequest.params.attachmentKey,
         ),
         status: 200,
       }),
