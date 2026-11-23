@@ -1000,19 +1000,32 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    *
    * Receiving files from the request and upload them to S3 are kept in one function to be able to
    * directly stream incoming data to S3 and keep memory usage low.
+   *
+   * On any failure (failing tmp upload, busboy error, client abort) all tmp files that were
+   * (or are still being) uploaded are removed before the error is rethrown.
    * @param {TSriRequest} sriRequest
-   * @returns
+   * @returns {Promise<{ attachmentsRcvd: Array<TFileObj>, fieldsRcvd: Record<string, any> }>}
    */
   async function receiveFilesAndMetadataFromBusboyAndUploadToS3(sriRequest) {
     /** @type {Array<TFileObj>} */
     const attachmentsRcvd = [];
     const fieldsRcvd = {};
+    /** @type {Array<Promise<TFileObj>>} */
     const tmpUploads = [];
+
+    // rejects as soon as one tmp upload fails, so we stop waiting for busboy 'close'
+    /** @type {(err: unknown) => void} */
+    let rejectOnUploadError = () => {};
+    let uploadErrorSignalled = false;
+    const uploadFailed = new Promise((_resolve, reject) => {
+      rejectOnUploadError = reject;
+    });
+    uploadFailed.catch(() => {}); // avoid unhandled rejection when nobody awaits it
 
     /**
      *
      * @param {TFileObj} fileObj
-     * @returns
+     * @returns {Promise<TFileObj>}
      */
     async function uploadTmpFile(fileObj) {
       try {
@@ -1036,13 +1049,19 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           logChannel,
           `uploading tmp file ${fileObj.tmpFileName} failed`
         );
+        // consume the rest of this part, otherwise busboy never continues / emits 'close'
+        fileObj.file?.resume();
+        if (!uploadErrorSignalled) {
+          uploadErrorSignalled = true;
+          rejectOnUploadError(err);
+        }
         throw err;
       }
     }
 
     sriRequest.busBoy.on(
       "file",
-      async (fieldname, fileStream, { filename, encoding, mimeType }) => {
+      (fieldname, fileStream, { filename, encoding, mimeType }) => {
         const safeFilename = getSafeFilename(filename);
 
         sriRequest.logDebug(
@@ -1057,12 +1076,15 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           mimetype: mimeType,
           file: fileStream,
           fields: {},
+          tmpFileName: getTmpFilename(safeFilename),
         };
 
-        fileObj.tmpFileName = getTmpFilename(safeFilename);
-
-        tmpUploads.push(uploadTmpFile(fileObj));
+        // register BEFORE starting the upload, so cleanup always knows the tmp name
         attachmentsRcvd.push(fileObj);
+
+        const p = uploadTmpFile(fileObj);
+        p.catch(() => {}); // handled later via allSettled; prevents 'unhandled rejection'
+        tmpUploads.push(p);
       }
     );
 
@@ -1074,12 +1096,46 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       fieldsRcvd[fieldname] = val;
     });
 
-    // wait until busboy is done
-    await pEvent(sriRequest.busBoy, "close");
-    sriRequest.logDebug(logChannel, "busBoy is done");
+    try {
+      // wait until busboy is done (rejects on busboy 'error'), or until an upload fails
+      await Promise.race([pEvent(sriRequest.busBoy, "close"), uploadFailed]);
+      sriRequest.logDebug(logChannel, "busBoy is done");
 
-    await Promise.all(tmpUploads);
-    sriRequest.logDebug(logChannel, "tmp uploads done");
+      // wait for ALL uploads, so no upload can finish after a cleanup
+      const results = await Promise.allSettled(tmpUploads);
+      const failed = results.find((r) => r.status === "rejected");
+      if (failed) {
+        throw /** @type {PromiseRejectedResult} */ (failed).reason;
+      }
+      sriRequest.logDebug(logChannel, "tmp uploads done");
+    } catch (err) {
+      // drain any remaining file parts so the request can finish
+      sriRequest.busBoy.removeAllListeners("file");
+      sriRequest.busBoy.on("file", (_name, s) => s.resume());
+
+      // make sure no upload is still running before cleaning up
+      await Promise.allSettled(tmpUploads);
+
+      const tmpFileNames = attachmentsRcvd
+        .map((a) => a.tmpFileName)
+        .filter(Boolean);
+      if (tmpFileNames.length) {
+        try {
+          await deleteFromS3(tmpFileNames);
+          sriRequest.logDebug(
+            logChannel,
+            `[receiveFiles] cleaned up ${tmpFileNames.join(" & ")}`
+          );
+        } catch (cleanupErr) {
+          errorReq({
+            msg: "[receiveFiles] cleanup of tmp files failed",
+            tmpFileNames,
+            error: errorToLogObject(cleanupErr),
+          });
+        }
+      }
+      throw err;
+    }
 
     return { attachmentsRcvd, fieldsRcvd };
   }
@@ -1418,15 +1474,15 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           // now that we validated the json body resource requirement, we can finally check security
           await checkSecurity(tx, sriRequest, safeBodyJsonArray, "create");
 
-          // all files are now uploaded into their TMP versions.
+          // all files are now uploaded into their TMP versions,
+          // rename the files to their real names now.
+          await renameAttachmentsToRealNames(allAttachmentsWithFileObj);
         } catch (err) {
           await handleErrorDuringUploadOrCopy(err, sriRequest, [
             ...copiedAttachmentsWithFileObj.map((e) => e.fileObj),
             ...attachmentsRcvd,
           ]);
         }
-        /// all went well, rename the files to their real names now.
-        await renameAttachmentsToRealNames(allAttachmentsWithFileObj);
 
         const response = allAttachmentsToHandle.map((file) => ({
           status: 200,
@@ -1522,7 +1578,9 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           // now that we validated the json body resource requirement, we can finally check security
           await checkSecurity(tx, sriRequest, safeBodyJsonArray, "create");
 
-          /// all files are now uploaded into their TMP versions.
+          // all files are now uploaded into their TMP versions,
+          // rename the files to their real names now.
+          await renameAttachmentsToRealNames(copiedAttachmentsWithFileObj);
         } catch (err) {
           await handleErrorDuringUploadOrCopy(
             err,
@@ -1530,9 +1588,6 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
             copiedAttachmentsWithFileObj.map((e) => e.fileObj)
           );
         }
-
-        /// all went well, rename the files to their real names now.
-        await renameAttachmentsToRealNames(copiedAttachmentsWithFileObj);
 
         return {
           status: 200,

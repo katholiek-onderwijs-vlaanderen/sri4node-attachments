@@ -3,6 +3,8 @@ const { ListObjectsV2Command, S3Client } = require("@aws-sdk/client-s3");
 const assert = require("assert");
 const FormData = require('form-data');
 const fs = require("fs");
+const S3 = require("@aws-sdk/client-s3");
+
 
 /* rewire adds a special setter and getter to modules so you can modify their behaviour for better unit testing. 
    this is used to access the private function 'getSafeFilename' of js/sri4node-attachments.js */
@@ -560,6 +562,56 @@ async function listTmpObjects() {
   return keys;
 }
 
+/**
+ * Temporarily intercepts S3Client.send. The interceptor can throw, delay or return
+ * undefined (= pass through). Returns a restore function.
+ * @param {(command: any, callIndex: number) => Promise<void> | void} interceptor
+ */
+function interceptS3(interceptor) {
+  const originalSend = S3.S3Client.prototype.send;
+  let callIndex = 0;
+  S3.S3Client.prototype.send = async function (command, ...rest) {
+    await interceptor(command, callIndex++);
+    return originalSend.call(this, command, ...rest);
+  };
+  return () => {
+    S3.S3Client.prototype.send = originalSend;
+  };
+}
+
+/**
+ * Returns the target key of a put/upload/copy command (if any).
+ * @param {any} command
+ * @returns {string | undefined}
+ */
+function commandKey(command) {
+  return command?.input?.Key;
+}
+
+/**
+ * Lists all object keys in the test bucket starting with the given prefix.
+ * @param {string} prefix
+ * @returns {Promise<string[]>}
+ */
+async function listObjectsWithPrefix(prefix) {
+  const s3 = new S3.S3Client({
+    endpoint: "http://localhost:4566/",
+    region: "eu-west-1",
+    forcePathStyle: true,
+    credentials: { accessKeyId: "test", secretAccessKey: "test" },
+  });
+  const keys = [];
+  let ContinuationToken;
+  do {
+    const res = await s3.send(
+      new S3.ListObjectsV2Command({ Bucket: "tests3bucket", Prefix: prefix, ContinuationToken })
+    );
+    keys.push(...(res.Contents ?? []).map((o) => o.Key));
+    ContinuationToken = res.NextContinuationToken;
+  } while (ContinuationToken);
+  return keys.sort();
+}
+
 exports = module.exports = {
   doGetStream,
   checkStreamEqual,
@@ -570,4 +622,7 @@ exports = module.exports = {
   copyFilesAndCheck,
   expectRequestError,
   listTmpObjects,
+  interceptS3,
+  commandKey,
+  listObjectsWithPrefix,
 };

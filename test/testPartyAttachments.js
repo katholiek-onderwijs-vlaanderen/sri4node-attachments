@@ -3,7 +3,7 @@ const { randomUUID: uuidv4 } = require("crypto");
 const { debug } = require("../js/common.js");
 const fs = require("fs");
 
-const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody, expectRequestError, listTmpObjects } = require("./common.js");
+const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody, expectRequestError, listTmpObjects, interceptS3, commandKey, listObjectsWithPrefix } = require("./common.js");
 const { beforeEach } = require("mocha");
 
 exports = module.exports = function (httpClient, type) {
@@ -1090,6 +1090,126 @@ exports = module.exports = function (httpClient, type) {
   });
 
   describe("rollback of tmp files", function () {
+    this.timeout(15000);
+    /** @type {undefined | (() => void)} */
+    let restoreS3;
+    afterEach(() => {
+      restoreS3?.();
+      restoreS3 = undefined;
+    });
+
+    async function createParty() {
+      const resourceHref = `${type}/${uuidv4()}`;
+      const res = await httpClient.put({
+        path: resourceHref,
+        body: { type: "person", name: "test user", status: "active" },
+      });
+      assert.equal(res.status, 201);
+      return resourceHref;
+    }
+
+    async function assertNoNewTmpFiles(tmpBefore) {
+      const leftovers = (await listTmpObjects()).filter((k) => !tmpBefore.has(k));
+      assert.deepEqual(leftovers, [], `tmp files not cleaned up: ${leftovers.join(", ")}`);
+    }
+
+    // scenario 1: one tmp upload fails, the others succeed
+    it("a failing tmp upload removes the tmp files of the successful uploads", async () => {
+      const resourceHref = await createParty();
+      const tmpBefore = new Set(await listTmpObjects());
+
+      let failed = false;
+      restoreS3 = interceptS3((command) => {
+        const key = commandKey(command);
+        const isTmpWrite =
+          key?.endsWith(".tmp") &&
+          /PutObject|CreateMultipartUpload/.test(command.constructor.name);
+        // let the first tmp upload succeed, fail the second one
+        if (isTmpWrite && key.includes("b.png") && !failed) {
+          failed = true;
+          throw new Error("injected tmp upload failure");
+        }
+      });
+
+      await assert.rejects(async () => {
+        const res = await doPutFiles(httpClient, type, [
+          { remotefileName: "a.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: uuidv4(), resourceHref },
+          { remotefileName: "b.png", localFilename: "test/images/avatar-black.png", attachmentKey: uuidv4(), resourceHref },
+        ]);
+        if (res.status >= 400) throw new Error(`status ${res.status}`);
+      });
+      assert.ok(failed, "injected failure was never triggered");
+
+      restoreS3();
+      restoreS3 = undefined;
+      await assertNoNewTmpFiles(tmpBefore);
+    });
+
+    // scenario 2: fail-fast while another upload is still in flight
+    it("cleans up tmp uploads that finish after another upload already failed", async () => {
+      const resourceHref = await createParty();
+      const tmpBefore = new Set(await listTmpObjects());
+
+      let failed = false;
+      restoreS3 = interceptS3(async (command) => {
+        const key = commandKey(command) ?? "";
+        if (!key.endsWith(".tmp")) return;
+        if (key.includes("slow.png")) {
+          // still running when the other upload fails
+          await new Promise((r) => setTimeout(r, 1000));
+        } else if (key.includes("fast.png") && !failed) {
+          failed = true;
+          throw new Error("injected fast failure");
+        }
+      });
+
+      await assert.rejects(async () => {
+        const res = await doPutFiles(httpClient, type, [
+          { remotefileName: "slow.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: uuidv4(), resourceHref },
+          { remotefileName: "fast.png", localFilename: "test/images/avatar-black.png", attachmentKey: uuidv4(), resourceHref },
+        ]);
+        if (res.status >= 400) throw new Error(`status ${res.status}`);
+      });
+      assert.ok(failed, "injected failure was never triggered");
+
+      restoreS3();
+      restoreS3 = undefined;
+      // the slow upload has finished by now; with Promise.all it would be left behind
+      await new Promise((r) => setTimeout(r, 1500));
+      await assertNoNewTmpFiles(tmpBefore);
+    });
+
+    // rename failure after all uploads succeeded
+    it("a failing rename removes the remaining tmp files", async () => {
+      const resourceHref = await createParty();
+      const tmpBefore = new Set(await listTmpObjects());
+
+      let failed = false;
+      restoreS3 = interceptS3((command) => {
+        const isRename =
+          command.constructor.name === "CopyObjectCommand" &&
+          String(command.input?.CopySource ?? "").endsWith(".tmp") &&
+          !String(commandKey(command)).endsWith(".tmp");
+        if (isRename && !failed) {
+          failed = true;
+          throw new Error("injected rename failure");
+        }
+      });
+
+      await assert.rejects(async () => {
+        const res = await doPutFiles(httpClient, type, [
+          { remotefileName: "r1.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: uuidv4(), resourceHref },
+          { remotefileName: "r2.png", localFilename: "test/images/avatar-black.png", attachmentKey: uuidv4(), resourceHref },
+        ]);
+        if (res.status >= 400) throw new Error(`status ${res.status}`);
+      });
+      assert.ok(failed, "injected failure was never triggered");
+
+      restoreS3();
+      restoreS3 = undefined;
+      await assertNoNewTmpFiles(tmpBefore);
+    });
+
     it("upload + copy in one request where the last one fails leaves no tmp files", async () => {
       const body = { type: "person", name: "test user", status: "active" };
       const [resourceKey, key1, key2, key3, key4] = Array.from({ length: 5 }, () => uuidv4());
@@ -1121,6 +1241,7 @@ exports = module.exports = function (httpClient, type) {
       assert.equal((await httpClient.get({ path: `${resourceHref}/attachments/copy.png` })).status, 404);
       assert.equal((await httpClient.get({ path: `${resourceHref}/attachments/new.png` })).status, 404);
     });
+
   });
 };
 
