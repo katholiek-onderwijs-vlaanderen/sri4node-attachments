@@ -1754,13 +1754,23 @@ exports = module.exports = function (httpClient, type) {
       /** @type {undefined | (() => void)} */
       let abortClient;
       let getObjectCalled = false;
-      restoreS3 = interceptS3(async (command) => {
-        if (command.constructor.name === "GetObjectCommand" && !getObjectCalled) {
-          getObjectCalled = true;
-          abortClient?.(); // the client disconnects while GetObject is pending
-          await new Promise((r) => setTimeout(r, 300));
+      /** @type {undefined | import("stream").Readable} */
+      let s3Body;
+      restoreS3 = interceptS3(
+        async (command) => {
+          if (command.constructor.name === "GetObjectCommand" && !getObjectCalled) {
+            getObjectCalled = true;
+            abortClient?.(); // the client disconnects while GetObject is pending
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        },
+        (command, response) => {
+          if (command.constructor.name === "GetObjectCommand" && !s3Body) {
+            s3Body = response.Body;
+          }
+          return response;
         }
-      });
+      );
 
       const { logs } = await captureServerErrorLogs(async () => {
         await new Promise((resolve) => {
@@ -1783,6 +1793,8 @@ exports = module.exports = function (httpClient, type) {
         /error during stream pipeline|the download failed|Error in streaming request|download\.failed/.test(l)
       );
       assert.deepEqual(errorLogs, [], "client abort logged as server error");
+      // an unconsumed S3 body keeps its connection to S3 busy
+      assert.ok(s3Body?.destroyed, "the S3 response body was not destroyed");
     });
   });
 };

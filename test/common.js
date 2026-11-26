@@ -584,26 +584,41 @@ async function expectRequestError(doRequest, expectedStatus, expectedCode) {
 }
 
 /**
- * Lists the keys of all .tmp objects in the test bucket.
+ * Lists all object keys in the test bucket starting with the given prefix (if any).
+ * The S3 client is destroyed afterwards: otherwise its keep-alive connections keep the test
+ * process running until the S3 server closes them.
+ * @param {string} [prefix]
  * @returns {Promise<string[]>}
  */
-async function listTmpObjects() {
+async function listTestBucketKeys(prefix) {
   const s3 = new S3Client({
     endpoint: "http://localhost:4566/",
     region: "eu-west-1",
     forcePathStyle: true,
     credentials: { accessKeyId: "test", secretAccessKey: "test" },
   });
-  const keys = [];
-  let ContinuationToken;
-  do {
-    const res = await s3.send(
-      new ListObjectsV2Command({ Bucket: "tests3bucket", ContinuationToken })
-    );
-    keys.push(...(res.Contents ?? []).map((o) => o.Key).filter((k) => k.endsWith(".tmp")));
-    ContinuationToken = res.NextContinuationToken;
-  } while (ContinuationToken);
-  return keys;
+  try {
+    const keys = [];
+    let ContinuationToken;
+    do {
+      const res = await s3.send(
+        new ListObjectsV2Command({ Bucket: "tests3bucket", Prefix: prefix, ContinuationToken })
+      );
+      keys.push(...(res.Contents ?? []).map((o) => o.Key));
+      ContinuationToken = res.NextContinuationToken;
+    } while (ContinuationToken);
+    return keys;
+  } finally {
+    s3.destroy();
+  }
+}
+
+/**
+ * Lists the keys of all .tmp objects in the test bucket.
+ * @returns {Promise<string[]>}
+ */
+async function listTmpObjects() {
+  return (await listTestBucketKeys()).filter((k) => k.endsWith(".tmp"));
 }
 
 /**
@@ -640,22 +655,7 @@ function commandKey(command) {
  * @returns {Promise<string[]>}
  */
 async function listObjectsWithPrefix(prefix) {
-  const s3 = new S3.S3Client({
-    endpoint: "http://localhost:4566/",
-    region: "eu-west-1",
-    forcePathStyle: true,
-    credentials: { accessKeyId: "test", secretAccessKey: "test" },
-  });
-  const keys = [];
-  let ContinuationToken;
-  do {
-    const res = await s3.send(
-      new S3.ListObjectsV2Command({ Bucket: "tests3bucket", Prefix: prefix, ContinuationToken })
-    );
-    keys.push(...(res.Contents ?? []).map((o) => o.Key));
-    ContinuationToken = res.NextContinuationToken;
-  } while (ContinuationToken);
-  return keys.sort();
+  return (await listTestBucketKeys(prefix)).sort();
 }
 
 /**

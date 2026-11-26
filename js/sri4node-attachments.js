@@ -218,12 +218,15 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
 
+  /** @type {S3.S3Client | undefined} one client per plugin instance (created on first use) */
+  let awss3client;
+
   /**
    * This method is stateful, as it will cache and return a previously existing client
    * @returns {S3.S3Client} awss3client
    */
   function getAWSS3Client() {
-    if (!this.awss3client) {
+    if (!awss3client) {
       // If accessKeyId and secretAccessKey are provided, use them; otherwise, let the SDK use the default credential provider chain (including IAM roles)
       const credentials =
         fullPluginConfig.s3key && fullPluginConfig.s3secret
@@ -233,7 +236,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           }
           : undefined;
 
-      this.awss3client = new S3.S3Client({
+      awss3client = new S3.S3Client({
         endpoint: fullPluginConfig.endpoint, // essential to point to our localstack-on-docker
         apiVersion: "2006-03-01",
         region: fullPluginConfig.s3region,
@@ -242,7 +245,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         forcePathStyle: true, // IMPORTANT cfr. https://qubyte.codes/blog/tip-connecting-to-localstack-s3-using-the-javascript-aws-sdk-v3
       });
     }
-    return this.awss3client;
+    return awss3client;
   }
 
   /**
@@ -422,6 +425,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           stream.off("error", onSourceError);
           stream.off("close", onSourceClose);
           stream.on("error", () => {}); // late errors of the destroyed source are irrelevant
+          // pipeline does not always destroy the source (e.g. it refuses a destination that was
+          // already closed): an unconsumed S3 body keeps its connection busy until S3 closes it
+          if (!stream.readableEnded && !stream.destroyed) {
+            stream.destroy();
+          }
         }
         debug("[downloadFromS3] Finished download of file.");
       } catch (err) {
