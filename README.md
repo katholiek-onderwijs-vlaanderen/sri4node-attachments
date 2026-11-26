@@ -199,6 +199,15 @@ curl -X POST -F 'body=[
 ]' -F "data=@thumbsUp.1.png" -F "data=@thumbsUp.2.png" http://yourserver.com/activities/attachments
 ```
 
+## Requirements
+
+This plugin is not standalone: it uses functionality of the sri4node instance (and optionally the security plugin) it is configured with. These are not declared as (peer) dependencies (sri4node is installed from git), so make sure your application uses at least:
+
+- **sri4node >= v2.3.50**: needed for `errorToLogObject` and the generic error handling of streaming requests.
+- **sri4node-security-api >= v2.3.13** (only when `security.plugin` is configured): needed for the `check` function.
+
+Older versions are not supported: the plugin will fail at runtime.
+
 ## Configuration
 
 - `s3key` : Use this key to connect to S3.
@@ -244,7 +253,7 @@ const attachments = sri4nodeAttachments.configure({
 });
 ```
 
-you have to send the securityplugin into the configuration. the securityplugin has to be at least #2.0.19 as it needs the `checkPermissionOnResourceList` function.
+you have to send the securityplugin into the configuration. the securityplugin has to be at least v2.3.13 as it needs the `check` function.
 
 - `plugin`: the security plugin
 - `abilityPrepend`: a string to prepend to the ability requested. upload will use ability `create`, download will use `read` and delete will use `delete`. if you want to have separate abilities for the attachments, like `attachment_create`,`attachment_read`,... set abilityPrepend to `attachment_`.
@@ -379,6 +388,7 @@ async function addAttachments(tx, sriReq, elements) {
 - `/resource/guid/attachments/` can be seen as a batch, as multiple attachments (BODY json array) and data files can be uploaded at once.
 - the `routePostfix` for the download and delete are regexed to only fire on filenames. You are free to add extra routes like `/:key/attachments/:attachmentkey` if you want to handle showing a json file on that route for an attachment.
 - you can throw errors in your afterUpload function. This will rollback all filechanges in the batch.
+- uploads, copies and deletes of the same S3 files are serialized with PostgreSQL transaction-scoped advisory locks (`pg_advisory_xact_lock`), held until the transaction of the request ends. This way the rollback of a failing request can never delete or overwrite the files of a concurrent request, a file deleted by a concurrent request is never restored, and two concurrent requests can not both create a file with the same name (but another key), also across server instances (they share the database). A request writing a file that is being written by another request waits until that request is finished.
 
 ### TODO
 

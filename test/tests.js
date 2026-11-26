@@ -2,7 +2,7 @@
 const expressFactory = require("express");
 const sri4node = require("sri4node");
 const sleep = require('await-sleep');
-const uuid = require("uuid");
+const { randomUUID: uuidv4 } = require("crypto");
 const assert = require("assert");
 
 const sri4nodeConfigFactory = require("./context/config");
@@ -195,7 +195,7 @@ describe("sri4node-attachments custom checkParentDeleted(4) : ", () => {
   });
 
   it("should be able to abort the request ", async () => {
-    const resourceKey = uuid.v4();
+    const resourceKey = uuidv4();
     const filename = 'test.png';
     const response = await httpClient.get({ path: `/partiesS3/${resourceKey}/attachments/${filename}?simulateParentDeleted=true` });
     assert.equal(response.status, 410);
@@ -212,7 +212,7 @@ describe("sri4node-attachments custom checkParentDeleted(4) : ", () => {
       name: "test user",
       status: "active",
     };
-    const [resourceKey, attachmentKey ] = Array.from({ length: 2 }, () => uuid.v4());
+    const [resourceKey, attachmentKey ] = Array.from({ length: 2 }, () => uuidv4());
     const resourceHref = type + "/" + resourceKey;
     const localFilename = "test/images/orange-boy-icon.png";
     const attachmentUrl = `${type}/${resourceKey}/attachments/${attachmentKey}`;
@@ -241,7 +241,7 @@ describe("sri4node-attachments custom checkParentDeleted(4) : ", () => {
   });
 
   it("should return 404 if file doesn't exists and checkParentDeleted does not throw", async () => {
-    const resourceKey = uuid.v4();
+    const resourceKey = uuidv4();
     const responseGet = await httpClient.get({ path: `/partiesS3/${resourceKey}/attachments/not_existing_file.png` });
     assert.equal(responseGet.status, 404);
   });

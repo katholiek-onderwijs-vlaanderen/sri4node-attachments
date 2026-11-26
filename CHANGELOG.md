@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.4.0 - 23 November 2026
+- updated libraries and adapted code accordingly
+- cleanup of temp S3 files in case of errors (also when one of several copies fails)
+- a failing rename of uploaded/copied files is undone: already renamed new files are removed and overwritten files are restored (also when S3 reported an error for a copy that was executed anyway)
+- writes and deletes of the same S3 files by concurrent requests are serialized (PostgreSQL advisory locks), so a rollback never deletes or overwrites the files of another request, and the unique filename check can not be bypassed by concurrent requests
+- requires sri4node >= v2.3.50 and sri4node-security-api >= v2.3.13 (see README)
+- a client abort during a download results in a 499 (debug logging only) instead of a 500 error, S3 read errors during a download are still reported as 500
+- removed unused @aws-sdk/s3-presigned-post dependency
+- removed obsolete and unused customRouteForPreSignedUpload function
+- fixed ambiguous customRouteForDownload url pattern, side effect is that uuid-like names (36 hex/dash characters, any case, since Express routing is case-insensitive) are no longer downloadable by name
+- a lot of new test cases
+
 ## v2.3.6 - 12 February 2026
 Added optional new parameter for customRouteForDownload: getCacheHeaders, a function that is called to allow the client to set caching headers based on sriRequest.
 

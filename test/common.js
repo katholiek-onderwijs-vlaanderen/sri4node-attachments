@@ -1,7 +1,11 @@
-/*global Buffer*/
+/*global Buffer, process*/
+const { ListObjectsV2Command, S3Client } = require("@aws-sdk/client-s3");
 const assert = require("assert");
 const FormData = require('form-data');
 const fs = require("fs");
+const S3 = require("@aws-sdk/client-s3");
+const http = require("http");
+
 
 /* rewire adds a special setter and getter to modules so you can modify their behaviour for better unit testing. 
    this is used to access the private function 'getSafeFilename' of js/sri4node-attachments.js */
@@ -319,10 +323,10 @@ async function checkUploadedFiles(httpClient, filesToPut) {
     const getStream = await doGetStream(httpClient, url);
 
     if (localFilename) {
-      console.log(`Comparing get result with local file ${localFilename}`);
+      // console.log(`Comparing get result with local file ${localFilename}`);
       await checkStreamEqual(getStream, fs.createReadStream(localFilename));
     } else if (urlToCopy) {
-      console.log(`Comparing get result with source url ${urlToCopy}`);
+      // console.log(`Comparing get result with source url ${urlToCopy}`);
       await checkStreamEqual(getStream, await doGetStream(httpClient, urlToCopy));
     }
   }
@@ -352,7 +356,6 @@ async function uploadFilesAndCheck(httpClient, filesToPut) {
   // are downloadable
   const responseGet = await httpClient.get({ path: resourceHref });
   assert.equal(responseGet.status, 200);
-  console.log(responseGet.body.attachments.length, filesToPut.length);
   for (const href of responseGet.body.attachments.map((a) => a.href)) {
     try {
       const responseGetA = await httpClient.get({ path: href });
@@ -394,6 +397,350 @@ async function copyFilesAndCheck(httpClient, filesToPut) {
   }
 }
 
+/**
+ * Converts the partialBody of a streaming error to a string
+ * (it can be a Buffer, an array of bytes, or a string).
+ * @param {any} partialBody
+ * @returns {string}
+ */
+function partialBodyToString(partialBody) {
+  if (partialBody === undefined || partialBody === null) return "";
+  if (typeof partialBody === "string") return partialBody;
+  if (Buffer.isBuffer(partialBody)) return partialBody.toString("utf8");
+  if (Array.isArray(partialBody)) {
+    // could be an array of bytes or an array of Buffers
+    return partialBody.every((b) => typeof b === "number")
+      ? Buffer.from(partialBody).toString("utf8")
+      : Buffer.concat(partialBody.map((b) => Buffer.from(b))).toString("utf8");
+  }
+  return String(partialBody);
+}
+
+/**
+ * Escapes a string for literal use inside a RegExp.
+ * @param {string} s
+ */
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Normalizes an error body: sri4node can return either { errors, status }
+ * or a wrapped SriError { status, body: { errors, status } }.
+ * @param {any} body
+ * @returns {{ status?: number, errors?: any[] } | undefined}
+ */
+function normalizeErrorBody(body) {
+  if (!body || typeof body !== "object") return undefined;
+  if (Array.isArray(body.errors)) return body;
+  if (body.body && typeof body.body === "object" && Array.isArray(body.body.errors)) {
+    return { status: body.status ?? body.body.status, errors: body.body.errors };
+  }
+  return body;
+}
+
+
+/**
+ * Checks that the (parsed) error body contains exactly the expected code and status.
+ * @param {any} rawBody
+ * @param {number} expectedStatus
+ * @param {string} expectedCode
+ * @param {string} context
+ */
+function assertErrorBody(rawBody, expectedStatus, expectedCode, context) {
+  const body = normalizeErrorBody(rawBody);
+  assert.ok(
+    body && Array.isArray(body.errors),
+    `${context}: expected an errors array, got ${JSON.stringify(rawBody)}`
+  );
+  const codes = body.errors.map((e) => e.code);
+  assert.ok(
+    codes.includes(expectedCode),
+    `${context}: expected error code '${expectedCode}', got [${codes.join(", ")}]`
+  );
+  if (body.status !== undefined) {
+    assert.equal(body.status, expectedStatus, `${context}: unexpected status in body`);
+  }
+}
+
+/**
+ * Generic message sri4node (>= 2.3.50) writes into a streaming response when an error occurs
+ * after the headers were sent. The actual error (code, status) is only logged server side.
+ */
+const STREAMING_ERROR_MSG = "Error in streaming request after headers were sent; destroying stream.";
+
+/**
+ * Captures everything written to stderr and stdout while doFn runs: sri4node logs its errors to
+ * stderr, but the "error" debug channel (used for request related errors, e.g. by this plugin)
+ * logs to stdout. Output is still passed through.
+ * @template T
+ * @param {() => Promise<T>} doFn
+ * @returns {Promise<{ result?: T, error?: any, failed: boolean, logs: string[] }>}
+ */
+async function captureServerErrorLogs(doFn) {
+  /** @type {string[]} */
+  const logs = [];
+  const outputs = [process.stderr, process.stdout];
+  const originalWrites = outputs.map((output) => output.write);
+  outputs.forEach((output, index) => {
+    output.write = function (chunk, ...rest) {
+      try {
+        logs.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
+      } catch {
+        // ignore
+      }
+      return originalWrites[index].call(output, chunk, ...rest);
+    };
+  });
+  try {
+    return { result: await doFn(), failed: false, logs };
+  } catch (error) {
+    return { error, failed: true, logs };
+  } finally {
+    outputs.forEach((output, index) => {
+      output.write = originalWrites[index];
+    });
+  }
+}
+
+/**
+ * Checks that the server logged an error with the expected code and status (for the given reqId
+ * if known).
+ * @param {string[]} logs
+ * @param {string | undefined} reqId
+ * @param {number} expectedStatus
+ * @param {string} expectedCode
+ */
+function assertErrorInServerLogs(logs, reqId, expectedStatus, expectedCode) {
+  // plain log mode: util.inspect output (code: 'x'), json log mode: "code":"x"
+  const codeRe = new RegExp(`["']?code["']?\\s*:\\s*["']${escapeRegExp(expectedCode)}["']`);
+  const statusRe = new RegExp(`["']?status["']?\\s*:\\s*${expectedStatus}(?!\\d)`);
+  const candidates = reqId ? logs.filter((l) => l.includes(reqId)) : logs;
+  const match = candidates.find((l) => codeRe.test(l) && statusRe.test(l));
+  assert.ok(
+    match,
+    `expected error code '${expectedCode}' with status ${expectedStatus} in server logs` +
+      `${reqId ? ` for reqId ${reqId}` : ""}, got:\n${candidates.join("").slice(0, 2000)}`
+  );
+}
+
+/**
+ * For an error after the headers of a streaming response were sent: checks that the partial body
+ * contains the generic sri4node streaming error message and that the server logged the expected
+ * error code + status for that request.
+ * @param {any} partialBody
+ * @param {string[]} logs captured with captureServerErrorLogs
+ * @param {number} expectedStatus
+ * @param {string} expectedCode
+ */
+function assertStreamingErrorLogged(partialBody, logs, expectedStatus, expectedCode) {
+  const text = partialBodyToString(partialBody);
+  assert.ok(
+    text.includes(STREAMING_ERROR_MSG),
+    `expected generic streaming error message in partial body, got: ${text.slice(-500)}`
+  );
+  const reqIdMatch = /\(reqId ([^)\s]+)\)/.exec(text);
+  const reqId = reqIdMatch && reqIdMatch[1] !== "undefined" ? reqIdMatch[1] : undefined;
+  assertErrorInServerLogs(logs, reqId, expectedStatus, expectedCode);
+}
+
+/**
+ * Expects a request to fail with the given status and error code.
+ * Accepts both:
+ *  - a proper error response (status + JSON body with errors[])
+ *  - a connection reset after the headers were sent (streaming.body.read.failed),
+ *    in which case the partial body must contain the generic sri4node streaming error message
+ *    and the expected error code + status must appear in the server error logging
+ *
+ * @param {() => Promise<any>} doRequest function that performs the request
+ * @param {number} expectedStatus
+ * @param {string} expectedCode
+ */
+async function expectRequestError(doRequest, expectedStatus, expectedCode) {
+  const { result: response, error, failed, logs } = await captureServerErrorLogs(async () => {
+    const resp = await doRequest();
+    // reading the body can also fail when the server closes the connection
+    const body =
+      resp.body && typeof resp.body.json === "function" ? await resp.body.json() : resp.body;
+    return { ...resp, body };
+  });
+
+  if (failed) {
+    if (error && error.code === "streaming.body.read.failed") {
+      assertStreamingErrorLogged(error.partialBody, logs, expectedStatus, expectedCode);
+      return;
+    }
+    throw error;
+  }
+
+  const { body } = response;
+  assert.equal(
+    response.status,
+    expectedStatus,
+    `expected status ${expectedStatus}, got ${response.status}: ${JSON.stringify(body)}`
+  );
+  const parsedBody = typeof body === "string" ? JSON.parse(body) : body;
+  assertErrorBody(parsedBody, expectedStatus, expectedCode, "response body");
+}
+
+/**
+ * Lists all object keys in the test bucket starting with the given prefix (if any).
+ * The S3 client is destroyed afterwards: otherwise its keep-alive connections keep the test
+ * process running until the S3 server closes them.
+ * @param {string} [prefix]
+ * @returns {Promise<string[]>}
+ */
+async function listTestBucketKeys(prefix) {
+  const s3 = new S3Client({
+    endpoint: "http://localhost:4566/",
+    region: "eu-west-1",
+    forcePathStyle: true,
+    credentials: { accessKeyId: "test", secretAccessKey: "test" },
+  });
+  try {
+    const keys = [];
+    let ContinuationToken;
+    do {
+      const res = await s3.send(
+        new ListObjectsV2Command({ Bucket: "tests3bucket", Prefix: prefix, ContinuationToken })
+      );
+      keys.push(...(res.Contents ?? []).map((o) => o.Key));
+      ContinuationToken = res.NextContinuationToken;
+    } while (ContinuationToken);
+    return keys;
+  } finally {
+    s3.destroy();
+  }
+}
+
+/**
+ * Lists the keys of all .tmp objects in the test bucket.
+ * @returns {Promise<string[]>}
+ */
+async function listTmpObjects() {
+  return (await listTestBucketKeys()).filter((k) => k.endsWith(".tmp"));
+}
+
+/**
+ * Temporarily intercepts S3Client.send. The interceptor can throw, delay or return
+ * undefined (= pass through). The optional transformResponse can replace (parts of) the
+ * response. Returns a restore function.
+ * @param {(command: any, callIndex: number) => Promise<void> | void} interceptor
+ * @param {(command: any, response: any) => any} [transformResponse]
+ */
+function interceptS3(interceptor, transformResponse = (_command, response) => response) {
+  const originalSend = S3.S3Client.prototype.send;
+  let callIndex = 0;
+  S3.S3Client.prototype.send = async function (command, ...rest) {
+    await interceptor(command, callIndex++);
+    return transformResponse(command, await originalSend.call(this, command, ...rest));
+  };
+  return () => {
+    S3.S3Client.prototype.send = originalSend;
+  };
+}
+
+/**
+ * Returns the target key of a put/upload/copy command (if any).
+ * @param {any} command
+ * @returns {string | undefined}
+ */
+function commandKey(command) {
+  return command?.input?.Key;
+}
+
+/**
+ * Lists all object keys in the test bucket starting with the given prefix.
+ * @param {string} prefix
+ * @returns {Promise<string[]>}
+ */
+async function listObjectsWithPrefix(prefix) {
+  return (await listTestBucketKeys(prefix)).sort();
+}
+
+/**
+ * Sends a multipart upload request with a large, incomplete file part and then aborts
+ * the connection. Used to trigger busboy/file stream errors server side.
+ * @param {object} opts
+ * @param {string} opts.baseUrl e.g. "http://localhost:5000"
+ * @param {string} opts.uploadPath e.g. "/partiesS3/attachments"
+ * @param {string} opts.resourceHref e.g. "/partiesS3/<key>"
+ * @param {string} [opts.method] same method as doPutFiles uses
+ * @param {number} [opts.bytesBeforeAbort] > 5MB so lib-storage actually starts uploading
+ * @param {number} [opts.waitBeforeAbortMs]
+ * @param {Array<{ name: string, size: number }>} [opts.leadingFiles] complete file parts sent
+ *    before the incomplete one
+ * @param {number} [opts.waitBeforePartialMs] wait between the leading files and the incomplete part
+ * @returns {Promise<void>}
+ */
+function sendPartialMultipartAndAbort({
+  baseUrl,
+  uploadPath,
+  resourceHref,
+  method = "POST",
+  bytesBeforeAbort = 6 * 1024 * 1024,
+  waitBeforeAbortMs = 500,
+  leadingFiles = [],
+  waitBeforePartialMs = 0,
+}) {
+  const boundary = `----test${Date.now()}`;
+  const fileName = "abort.png";
+  const bodyJson = JSON.stringify(
+    [...leadingFiles.map((f) => f.name), fileName].map((file) => ({
+      file,
+      attachment: { key: require("crypto").randomUUID() },
+      resource: { href: resourceHref },
+    }))
+  );
+
+  // every part ends with the delimiter of the next one ("\r\n--boundary"), so busboy knows
+  // immediately that a (leading) file part is complete
+  const filePartHeader = (name) =>
+    `\r\nContent-Disposition: form-data; name="data"; filename="${name}"\r\n` +
+    `Content-Type: image/png\r\n\r\n`;
+
+  const head =
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="body"\r\n\r\n` +
+    `${bodyJson}\r\n--${boundary}`;
+
+  const url = new URL(uploadPath, baseUrl);
+
+  return new Promise((resolve) => {
+    const req = http.request(url, {
+      method,
+      headers: {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        // no content-length: chunked, so the server keeps waiting for more data
+      },
+    });
+    // the abort produces client-side errors as well; those are expected
+    req.on("error", () => resolve());
+    req.on("response", (res) => {
+      res.resume();
+      res.on("end", resolve);
+      res.on("error", () => resolve());
+    });
+
+    req.write(head);
+    for (const { name, size } of leadingFiles) {
+      req.write(filePartHeader(name));
+      req.write(Buffer.alloc(size, 0x41));
+      req.write(`\r\n--${boundary}`);
+    }
+
+    setTimeout(() => {
+      req.write(filePartHeader(fileName));
+      req.write(Buffer.alloc(bytesBeforeAbort, 0x42)); // incomplete file part, no closing boundary
+
+      setTimeout(() => {
+        req.destroy(); // client abort -> busboy emits 'error' on the file stream
+        resolve();
+      }, waitBeforeAbortMs);
+    }, waitBeforePartialMs);
+  });
+}
+
 
 exports = module.exports = {
   doGetStream,
@@ -403,4 +750,13 @@ exports = module.exports = {
   deleteAttachmentAndVerify,
   uploadFilesAndCheck,
   copyFilesAndCheck,
+  expectRequestError,
+  captureServerErrorLogs,
+  assertErrorInServerLogs,
+  getStreamAsBuffer,
+  listTmpObjects,
+  interceptS3,
+  commandKey,
+  listObjectsWithPrefix,
+  sendPartialMultipartAndAbort,
 };

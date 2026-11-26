@@ -40,6 +40,7 @@ module.exports = async function (handleMultipleUploadsTogether = false, uploadIn
         // "db",
         // "sql",
       ],
+      json: false,
     },
     resources: [
       partiesFactory(sri4node, attachmentUtilsForS3, "/partiesS3", customStoreAttachment, customCheckDownload),
