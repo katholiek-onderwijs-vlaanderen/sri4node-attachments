@@ -1602,10 +1602,11 @@ exports = module.exports = function (httpClient, type) {
         }
       );
 
-      const { logs } = await captureServerErrorLogs(async () => {
+      const { logs, error, failed } = await captureServerErrorLogs(async () => {
         const res = await httpClient.delete({ path: `${resourceHref}/attachments/${attachmentKey}` });
         assert.equal(res.status, 204);
       });
+      if (failed) throw error;
       restoreS3();
       restoreS3 = undefined;
 
