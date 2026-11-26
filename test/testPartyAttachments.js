@@ -1682,6 +1682,43 @@ exports = module.exports = function (httpClient, type) {
       );
       assert.deepEqual(errorLogs, [], "client abort logged as server error");
     });
+
+    it("a client abort while the S3 request is pending is not logged as a server error", async () => {
+      const resourceHref = await createPartyWithAttachment("pending.png");
+
+      /** @type {undefined | (() => void)} */
+      let abortClient;
+      let getObjectCalled = false;
+      restoreS3 = interceptS3(async (command) => {
+        if (command.constructor.name === "GetObjectCommand" && !getObjectCalled) {
+          getObjectCalled = true;
+          abortClient?.(); // the client disconnects while GetObject is pending
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      });
+
+      const { logs } = await captureServerErrorLogs(async () => {
+        await new Promise((resolve) => {
+          const req = http.get(
+            new URL(`${resourceHref}/attachments/pending.png`, "http://localhost:5000"),
+            (res) => res.resume()
+          );
+          abortClient = () => {
+            req.destroy();
+            resolve();
+          };
+          req.on("error", () => resolve());
+        });
+        // give the server time to finish the request
+        await new Promise((r) => setTimeout(r, 800));
+      });
+
+      assert.ok(getObjectCalled, "GetObject was never called");
+      const errorLogs = logs.filter((l) =>
+        /error during stream pipeline|the download failed|Error in streaming request|download\.failed/.test(l)
+      );
+      assert.deepEqual(errorLogs, [], "client abort logged as server error");
+    });
   });
 };
 

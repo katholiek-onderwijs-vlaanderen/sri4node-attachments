@@ -361,12 +361,15 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       //  --> currently use response.Body with incorrect typescript types
       // (see https://stackoverflow.com/a/67373050)
       // const stream = response.Body.transformToWebStream();
-      const stream = response.Body;
+      // In nodejs the body is always a Readable (the typescript type also covers browser types)
+      const stream = /** @type {import('stream').Readable} */ (response.Body);
 
       // pipeline destroys all streams on any failure, so outstream.destroyed alone does not
       // tell which side failed: remember whether the client side closed before the S3 source
-      // emitted an error (a failing source errors first, outstream is closed afterwards)
-      let outstreamClosed = false;
+      // emitted an error (a failing source errors first, outstream is closed afterwards).
+      // The client can also have disconnected already while the S3 request was pending: then
+      // 'close' has fired before the listener below is registered.
+      let outstreamClosed = !!(outstream.destroyed || outstream.closed);
       let sourceFailed = false;
       // Use pipeline with proper cleanup - it handles most edge cases automatically
       try {
@@ -386,7 +389,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         outstream.once("close", onOutstreamClose);
         stream.once("error", onSourceError);
         try {
-          // @ts-ignore - AWS SDK stream types
+          // @ts-ignore - the promisified pipeline typing does not match TReadableStream outstream
           await pipelineAsync(stream, outstream);
         } finally {
           outstream.off("close", onOutstreamClose);

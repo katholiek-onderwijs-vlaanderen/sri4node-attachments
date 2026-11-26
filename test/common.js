@@ -470,8 +470,9 @@ function assertErrorBody(rawBody, expectedStatus, expectedCode, context) {
 const STREAMING_ERROR_MSG = "Error in streaming request after headers were sent; destroying stream.";
 
 /**
- * Captures everything written to stderr (where sri4node logs its errors, both in plain and in
- * json log mode) while doFn runs. Output is still passed through to the real stderr.
+ * Captures everything written to stderr and stdout while doFn runs: sri4node logs its errors to
+ * stderr, but the "error" debug channel (used for request related errors, e.g. by this plugin)
+ * logs to stdout. Output is still passed through.
  * @template T
  * @param {() => Promise<T>} doFn
  * @returns {Promise<{ result?: T, error?: any, failed: boolean, logs: string[] }>}
@@ -479,21 +480,26 @@ const STREAMING_ERROR_MSG = "Error in streaming request after headers were sent;
 async function captureServerErrorLogs(doFn) {
   /** @type {string[]} */
   const logs = [];
-  const originalWrite = process.stderr.write;
-  process.stderr.write = function (chunk, ...rest) {
-    try {
-      logs.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
-    } catch {
-      // ignore
-    }
-    return originalWrite.call(process.stderr, chunk, ...rest);
-  };
+  const outputs = [process.stderr, process.stdout];
+  const originalWrites = outputs.map((output) => output.write);
+  outputs.forEach((output, index) => {
+    output.write = function (chunk, ...rest) {
+      try {
+        logs.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
+      } catch {
+        // ignore
+      }
+      return originalWrites[index].call(output, chunk, ...rest);
+    };
+  });
   try {
     return { result: await doFn(), failed: false, logs };
   } catch (error) {
     return { error, failed: true, logs };
   } finally {
-    process.stderr.write = originalWrite;
+    outputs.forEach((output, index) => {
+      output.write = originalWrites[index];
+    });
   }
 }
 
