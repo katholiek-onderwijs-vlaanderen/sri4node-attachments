@@ -1022,6 +1022,33 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     });
     uploadFailed.catch(() => {}); // avoid unhandled rejection when nobody awaits it
 
+    // NOTE: no explicit busBoy 'error' listener needed: pEvent(busBoy, "close") below also
+    // listens for 'error' (default rejectionEvents) until busboy closes, also when
+    // uploadFailed wins the race.
+
+    // sri4node pipes the http request into a PassThrough (inStream) and destroys it when the
+    // client aborts (pipe() itself does not propagate that). Destroy busboy then as well, so it
+    // emits 'error' (also on the active file stream) instead of waiting forever.
+    const inStream = sriRequest.inStream;
+    const onInStreamAbort = () => {
+      if (!inStream.readableEnded && !sriRequest.busBoy.destroyed) {
+        sriRequest.busBoy.destroy(
+          new sriRequest.SriError({
+            status: 499,
+            errors: [
+              {
+                code: "upload.aborted",
+                type: "ERROR",
+                message: "client aborted the upload",
+              },
+            ],
+          })
+        );
+      }
+    };
+    inStream?.on("close", onInStreamAbort);
+    inStream?.on("error", onInStreamAbort);
+
     /**
      *
      * @param {TFileObj} fileObj
@@ -1135,6 +1162,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         }
       }
       throw err;
+    } finally {
+      inStream?.off("close", onInStreamAbort);
+      // keep a no-op 'error' listener: sri4node may still destroy inStream with an error later
+      inStream?.on("error", () => {});
+      inStream?.off("error", onInStreamAbort);
     }
 
     return { attachmentsRcvd, fieldsRcvd };

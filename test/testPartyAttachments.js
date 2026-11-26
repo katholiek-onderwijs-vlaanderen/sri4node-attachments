@@ -3,7 +3,7 @@ const { randomUUID: uuidv4 } = require("crypto");
 const { debug } = require("../js/common.js");
 const fs = require("fs");
 
-const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody, expectRequestError, listTmpObjects, interceptS3, commandKey, listObjectsWithPrefix } = require("./common.js");
+const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody, expectRequestError, listTmpObjects, interceptS3, commandKey, listObjectsWithPrefix, sendPartialMultipartAndAbort } = require("./common.js");
 const { beforeEach } = require("mocha");
 
 exports = module.exports = function (httpClient, type) {
@@ -1295,6 +1295,39 @@ exports = module.exports = function (httpClient, type) {
       // nothing of the failed request may be visible
       assert.equal((await httpClient.get({ path: `${resourceHref}/attachments/copy.png` })).status, 404);
       assert.equal((await httpClient.get({ path: `${resourceHref}/attachments/new.png` })).status, 404);
+    });
+
+    it("a stream error after a failed tmp upload does not crash the process", async () => {
+      const resourceHref = await createParty();
+      const tmpBefore = new Set(await listTmpObjects());
+      /** @type {Error[]} */
+      const uncaught = [];
+      const onUncaught = (err) => uncaught.push(err);
+      process.on("uncaughtException", onUncaught);
+
+      let failed = false;
+      restoreS3 = interceptS3((command) => {
+        if (String(commandKey(command)).endsWith(".tmp")) {
+          failed = true;
+          throw new Error("injected tmp upload failure");
+        }
+      });
+
+      try {
+        await sendPartialMultipartAndAbort({
+          baseUrl: "http://localhost:5000", // must match the port of the test server / httpClient
+          uploadPath: `/${type.replace(/^\//, "")}/attachments`,
+          resourceHref: `/${resourceHref.replace(/^\//, "")}`,
+        });
+        await new Promise((r) => setTimeout(r, 1000));
+        assert.ok(failed, "injected failure was never triggered");
+        assert.deepEqual(uncaught.map((e) => e.message), [], "uncaught stream error");
+        restoreS3();
+        restoreS3 = undefined;
+        await assertNoNewTmpFiles(tmpBefore);
+      } finally {
+        process.off("uncaughtException", onUncaught);
+      }
     });
 
   });

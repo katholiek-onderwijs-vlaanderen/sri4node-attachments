@@ -32,7 +32,7 @@
     "pg": "^8.9.0",
     "prettier": "^2.8.4",
     "rewire": "^6.0.0",
-    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.49",
+    "sri4node": "https://github.com/katholiek-onderwijs-vlaanderen/sri4node.git#v2.3.50",
     "undici": "^8.12.4"
   },
   "overrides": {
