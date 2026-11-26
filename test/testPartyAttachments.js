@@ -1435,6 +1435,99 @@ exports = module.exports = function (httpClient, type) {
       await assertNoNewTmpFiles(tmpBefore);
     });
 
+    it("a rename that succeeded on S3 but reported an error is undone as well", async () => {
+      const resourceHref = await createParty();
+      const resourceKey = resourceHref.split("/").pop();
+      const existingKey = uuidv4();
+      await uploadFilesAndCheck(httpClient, [
+        { remotefileName: "keep.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: existingKey, resourceHref },
+      ]);
+      const tmpBefore = new Set(await listTmpObjects());
+
+      // the copies to keep.png and fresh.png are executed by S3, but the client gets an error
+      // (e.g. a timeout after S3 did the copy): only once per target, so the restore works
+      const failedTargets = new Set();
+      restoreS3 = interceptS3(
+        () => {},
+        (command, response) => {
+          const key = String(commandKey(command));
+          const isRename =
+            command.constructor.name === "CopyObjectCommand" &&
+            String(command.input?.CopySource ?? "").endsWith(".tmp") &&
+            !key.endsWith(".tmp");
+          if (isRename && /-(keep|fresh)\.png$/.test(key) && !failedTargets.has(key)) {
+            failedTargets.add(key);
+            throw new Error("injected error after the copy succeeded");
+          }
+          return response;
+        }
+      );
+
+      await assert.rejects(async () => {
+        const res = await doPutFiles(httpClient, type, [
+          // overwrite of the existing attachment (same key) with other content
+          { remotefileName: "keep.png", localFilename: "test/images/avatar-black.png", attachmentKey: existingKey, resourceHref },
+          // new attachment
+          { remotefileName: "fresh.png", localFilename: "test/images/avatar-blue.png", attachmentKey: uuidv4(), resourceHref },
+        ]);
+        if (res.status >= 400) throw new Error(`status ${res.status}`);
+      });
+      assert.equal(failedTargets.size, 2, "injected failures were not triggered");
+
+      restoreS3();
+      restoreS3 = undefined;
+      const downloaded = await doGetStream(httpClient, `${resourceHref}/attachments/keep.png`);
+      await checkStreamEqual(downloaded, fs.createReadStream("test/images/orange-boy-icon.png"));
+      assert.deepEqual(await listObjectsWithPrefix(resourceKey), [`${resourceKey}-keep.png`]);
+      await assertNoNewTmpFiles(tmpBefore);
+    });
+
+    it("a rollback does not bring back a file that was deleted concurrently", async () => {
+      const resourceHref = await createParty();
+      const resourceKey = resourceHref.split("/").pop();
+      const existingKey = uuidv4();
+      await uploadFilesAndCheck(httpClient, [
+        { remotefileName: "x.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: existingKey, resourceHref },
+      ]);
+      const tmpBefore = new Set(await listTmpObjects());
+
+      // request A: overwrites x.png, but the rename of other.png fails after a delay
+      let failed = false;
+      restoreS3 = interceptS3(async (command) => {
+        const isRename =
+          command.constructor.name === "CopyObjectCommand" &&
+          String(command.input?.CopySource ?? "").endsWith(".tmp") &&
+          !String(commandKey(command)).endsWith(".tmp");
+        if (isRename && String(commandKey(command)).endsWith("-other.png") && !failed) {
+          failed = true;
+          await new Promise((r) => setTimeout(r, 1000));
+          throw new Error("injected rename failure");
+        }
+      });
+      const requestA = (async () => {
+        const res = await doPutFiles(httpClient, type, [
+          { remotefileName: "x.png", localFilename: "test/images/avatar-black.png", attachmentKey: existingKey, resourceHref },
+          { remotefileName: "other.png", localFilename: "test/images/avatar-blue.png", attachmentKey: uuidv4(), resourceHref },
+        ]);
+        if (res.status >= 400) throw new Error(`status ${res.status}`);
+      })();
+      requestA.catch(() => {});
+
+      // request D: deletes x.png while A is still busy (separate client, otherwise D waits for A)
+      await new Promise((r) => setTimeout(r, 400));
+      const otherHttpClient = require("./httpClient.js").httpClientFactory("http://localhost:5000");
+      const responseD = await otherHttpClient.delete({ path: `${resourceHref}/attachments/${existingKey}` });
+      assert.equal(responseD.status, 204);
+      await assert.rejects(requestA);
+      assert.ok(failed, "injected failure was never triggered");
+
+      restoreS3();
+      restoreS3 = undefined;
+      // D reported a successful delete, so the rollback of A may not restore x.png
+      assert.deepEqual(await listObjectsWithPrefix(resourceKey), []);
+      await assertNoNewTmpFiles(tmpBefore);
+    });
+
     it("a failing copy removes the tmp copies that succeeded", async () => {
       const sourceHref = await createParty();
       await uploadFilesAndCheck(httpClient, [

@@ -1434,6 +1434,19 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
+   * @typedef {{
+   *   target: string,
+   *   tmpFileName: string,
+   *   filename: string,
+   *   attachmentKey: string,
+   *   existed: boolean,
+   *   backupFileName?: string,
+   *   backupConfirmed: boolean,
+   *   copyAttempted: boolean,
+   * }} TRename
+   */
+
+  /**
    * This function will rename the uploaded / copied attachments from
    * their temporarily filenames to their real filenames.
    * The caller must hold the locks on the real filenames (see lockS3Objects).
@@ -1441,14 +1454,18 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * @returns
    */
   async function renameAttachmentsToRealNames(attachmentsWithFileObj) {
+    // NOTE: an S3 copy that reports an error may still have been executed (e.g. a timeout after
+    // S3 did the copy), so the state is tracked as 'attempted' instead of 'succeeded'.
+    /** @type {Array<TRename>} */
     const renames = attachmentsWithFileObj.map((file) => ({
       target: getS3FileNameByMultiPartBody(file),
       tmpFileName: file.fileObj.tmpFileName,
       filename: file.fileObj.filename,
       attachmentKey: file.attachment.key,
-      /** @type {string | undefined} */
+      existed: false,
       backupFileName: undefined,
-      copied: false,
+      backupConfirmed: false,
+      copyAttempted: false,
     }));
 
     try {
@@ -1456,9 +1473,10 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       await settleAllOrThrow(
         renames.map(async (r) => {
           if (await existsOnS3(r.target)) {
-            const backupFileName = getTmpFilename(`backup-${r.filename}`);
-            await copyFileKeepMetadata(backupFileName, r.target);
-            r.backupFileName = backupFileName;
+            r.existed = true;
+            r.backupFileName = getTmpFilename(`backup-${r.filename}`);
+            await copyFileKeepMetadata(r.backupFileName, r.target);
+            r.backupConfirmed = true;
           }
         })
       );
@@ -1466,8 +1484,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       await settleAllOrThrow(
         renames.map(async (r) => {
           debug(`Rename ${r.tmpFileName} to ${r.target}`);
+          r.copyAttempted = true;
           await copyFile(r.target, r.tmpFileName, r.attachmentKey);
-          r.copied = true;
         })
       );
     } catch (err) {
@@ -1486,30 +1504,38 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
-   * Undoes the renames that already happened: newly created files are removed, overwritten
-   * files are restored from their backup. Backups are removed afterwards (unless the restore
-   * failed, then the backup is kept and logged so it can be restored manually).
+   * Undoes the renames that were attempted (an attempted copy may have been executed by S3
+   * even when it reported an error): newly created files are removed, overwritten files are
+   * restored from their backup. This is safe because the caller holds the locks on the targets
+   * (see lockS3Objects), so nobody else wrote them in the meantime.
+   * Backups are removed afterwards (also the ones whose creation reported an error, they may
+   * exist anyway), unless the restore failed: then the backup is kept and logged so it can be
+   * restored manually.
    *
-   * @param {Array<{ target: string, backupFileName?: string, copied: boolean }>} renames
+   * @param {Array<TRename>} renames
    */
   async function undoRenames(renames) {
-    const toDelete = renames.filter((r) => r.copied && !r.backupFileName).map((r) => r.target);
-    const backupsToRemove = renames.filter((r) => r.backupFileName && !r.copied).map((r) => r.backupFileName);
+    const attempted = renames.filter((r) => r.copyAttempted);
+    // a copy is only attempted after all backups were confirmed, so an existing target always
+    // has a confirmed backup here
+    const toDelete = attempted.filter((r) => !r.existed).map((r) => r.target);
+    const toRestore = attempted.filter((r) => r.existed && r.backupConfirmed);
+    const backupsToRemove = renames
+      .filter((r) => r.backupFileName && !toRestore.includes(r))
+      .map((r) => r.backupFileName);
 
     await Promise.all(
-      renames
-        .filter((r) => r.copied && r.backupFileName)
-        .map(async (r) => {
-          try {
-            await copyFileKeepMetadata(r.target, r.backupFileName);
-            backupsToRemove.push(r.backupFileName);
-          } catch (err) {
-            error({
-              msg: `[undoRenames] restoring ${r.target} failed, the original file is kept as ${r.backupFileName}`,
-              error: errorToLogObject(err),
-            });
-          }
-        })
+      toRestore.map(async (r) => {
+        try {
+          await copyFileKeepMetadata(r.target, r.backupFileName);
+          backupsToRemove.push(r.backupFileName);
+        } catch (err) {
+          error({
+            msg: `[undoRenames] restoring ${r.target} failed, the original file is kept as ${r.backupFileName}`,
+            error: errorToLogObject(err),
+          });
+        }
+      })
     );
 
     await deleteFromS3Logged(
@@ -1987,6 +2013,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           sriRequest.params.key,
           sriRequest.params.attachmentKey
         );
+        // wait for requests writing the same file: otherwise their rollback could restore the
+        // file after this delete was reported as successful
+        await lockS3Objects(tx, [
+          getS3FileNameBySriRequestAndAttachmentFilename(sriRequest, filename),
+        ]);
         await handleFileDelete(sriRequest, filename);
         return {
           status: 204,
