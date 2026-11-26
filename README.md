@@ -199,6 +199,15 @@ curl -X POST -F 'body=[
 ]' -F "data=@thumbsUp.1.png" -F "data=@thumbsUp.2.png" http://yourserver.com/activities/attachments
 ```
 
+## Requirements
+
+This plugin is not standalone: it uses functionality of the sri4node instance (and optionally the security plugin) it is configured with. These are not declared as (peer) dependencies (sri4node is installed from git), so make sure your application uses at least:
+
+- **sri4node >= v2.3.50**: needed for `errorToLogObject` and the generic error handling of streaming requests.
+- **sri4node-security-api >= v2.3.13** (only when `security.plugin` is configured): needed for the `check` function.
+
+Older versions are not supported: the plugin will fail at runtime.
+
 ## Configuration
 
 - `s3key` : Use this key to connect to S3.
@@ -244,7 +253,7 @@ const attachments = sri4nodeAttachments.configure({
 });
 ```
 
-you have to send the securityplugin into the configuration. the securityplugin has to be at least #2.0.19 as it needs the `checkPermissionOnResourceList` function.
+you have to send the securityplugin into the configuration. the securityplugin has to be at least v2.3.13 as it needs the `check` function.
 
 - `plugin`: the security plugin
 - `abilityPrepend`: a string to prepend to the ability requested. upload will use ability `create`, download will use `read` and delete will use `delete`. if you want to have separate abilities for the attachments, like `attachment_create`,`attachment_read`,... set abilityPrepend to `attachment_`.

@@ -1,4 +1,4 @@
-/*global Buffer*/
+/*global Buffer, process*/
 const { ListObjectsV2Command, S3Client } = require("@aws-sdk/client-s3");
 const assert = require("assert");
 const FormData = require('form-data');
@@ -519,6 +519,26 @@ function assertErrorInServerLogs(logs, reqId, expectedStatus, expectedCode) {
 }
 
 /**
+ * For an error after the headers of a streaming response were sent: checks that the partial body
+ * contains the generic sri4node streaming error message and that the server logged the expected
+ * error code + status for that request.
+ * @param {any} partialBody
+ * @param {string[]} logs captured with captureServerErrorLogs
+ * @param {number} expectedStatus
+ * @param {string} expectedCode
+ */
+function assertStreamingErrorLogged(partialBody, logs, expectedStatus, expectedCode) {
+  const text = partialBodyToString(partialBody);
+  assert.ok(
+    text.includes(STREAMING_ERROR_MSG),
+    `expected generic streaming error message in partial body, got: ${text.slice(-500)}`
+  );
+  const reqIdMatch = /\(reqId ([^)\s]+)\)/.exec(text);
+  const reqId = reqIdMatch && reqIdMatch[1] !== "undefined" ? reqIdMatch[1] : undefined;
+  assertErrorInServerLogs(logs, reqId, expectedStatus, expectedCode);
+}
+
+/**
  * Expects a request to fail with the given status and error code.
  * Accepts both:
  *  - a proper error response (status + JSON body with errors[])
@@ -541,15 +561,7 @@ async function expectRequestError(doRequest, expectedStatus, expectedCode) {
 
   if (failed) {
     if (error && error.code === "streaming.body.read.failed") {
-      const text = partialBodyToString(error.partialBody);
-      assert.ok(
-        text.includes(STREAMING_ERROR_MSG),
-        `expected generic streaming error message in partial body, got: ${text.slice(0, 500)}`
-      );
-      const reqIdMatch = /\(reqId ([^)\s]+)\)/.exec(text);
-      const reqId =
-        reqIdMatch && reqIdMatch[1] !== "undefined" ? reqIdMatch[1] : undefined;
-      assertErrorInServerLogs(logs, reqId, expectedStatus, expectedCode);
+      assertStreamingErrorLogged(error.partialBody, logs, expectedStatus, expectedCode);
       return;
     }
     throw error;
@@ -590,15 +602,17 @@ async function listTmpObjects() {
 
 /**
  * Temporarily intercepts S3Client.send. The interceptor can throw, delay or return
- * undefined (= pass through). Returns a restore function.
+ * undefined (= pass through). The optional transformResponse can replace (parts of) the
+ * response. Returns a restore function.
  * @param {(command: any, callIndex: number) => Promise<void> | void} interceptor
+ * @param {(command: any, response: any) => any} [transformResponse]
  */
-function interceptS3(interceptor) {
+function interceptS3(interceptor, transformResponse = (_command, response) => response) {
   const originalSend = S3.S3Client.prototype.send;
   let callIndex = 0;
   S3.S3Client.prototype.send = async function (command, ...rest) {
     await interceptor(command, callIndex++);
-    return originalSend.call(this, command, ...rest);
+    return transformResponse(command, await originalSend.call(this, command, ...rest));
   };
   return () => {
     S3.S3Client.prototype.send = originalSend;
@@ -715,6 +729,9 @@ exports = module.exports = {
   uploadFilesAndCheck,
   copyFilesAndCheck,
   expectRequestError,
+  captureServerErrorLogs,
+  assertErrorInServerLogs,
+  getStreamAsBuffer,
   listTmpObjects,
   interceptS3,
   commandKey,

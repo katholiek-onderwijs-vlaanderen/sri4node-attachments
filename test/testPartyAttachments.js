@@ -1,9 +1,12 @@
+/*global Buffer, process*/
 const assert = require("assert");
 const { randomUUID: uuidv4 } = require("crypto");
 const { debug } = require("../js/common.js");
 const fs = require("fs");
 
-const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody, expectRequestError, listTmpObjects, interceptS3, commandKey, listObjectsWithPrefix, sendPartialMultipartAndAbort } = require("./common.js");
+const { doPutFiles, uploadFilesAndCheck, copyFilesAndCheck, doGetStream, checkStreamEqual, deleteAttachmentAndVerify, createUploadBody, expectRequestError, listTmpObjects, interceptS3, commandKey, listObjectsWithPrefix, sendPartialMultipartAndAbort, captureServerErrorLogs, assertErrorInServerLogs, getStreamAsBuffer } = require("./common.js");
+const http = require("http");
+const { Readable } = require("stream");
 const { beforeEach } = require("mocha");
 
 exports = module.exports = function (httpClient, type) {
@@ -1265,6 +1268,115 @@ exports = module.exports = function (httpClient, type) {
       await assertNoNewTmpFiles(tmpBefore);
     });
 
+    /**
+     * Returns an S3 interceptor that fails the rename (tmp -> real name) of the file whose real
+     * S3 name ends with the given suffix, after a delay so the other renames finish first.
+     * @param {string} targetSuffix
+     * @param {{ failed: boolean }} state
+     */
+    function failRenameOf(targetSuffix, state) {
+      return async (command) => {
+        const isRename =
+          command.constructor.name === "CopyObjectCommand" &&
+          String(command.input?.CopySource ?? "").endsWith(".tmp") &&
+          !String(commandKey(command)).endsWith(".tmp");
+        if (isRename && String(commandKey(command)).endsWith(targetSuffix) && !state.failed) {
+          await new Promise((r) => setTimeout(r, 300));
+          state.failed = true;
+          throw new Error("injected rename failure");
+        }
+      };
+    }
+
+    it("a failing rename does not leave already renamed files behind", async () => {
+      const resourceHref = await createParty();
+      const resourceKey = resourceHref.split("/").pop();
+      const tmpBefore = new Set(await listTmpObjects());
+
+      const state = { failed: false };
+      restoreS3 = interceptS3(failRenameOf("-n2.png", state));
+
+      await assert.rejects(async () => {
+        const res = await doPutFiles(httpClient, type, [
+          { remotefileName: "n1.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: uuidv4(), resourceHref },
+          { remotefileName: "n2.png", localFilename: "test/images/avatar-black.png", attachmentKey: uuidv4(), resourceHref },
+        ]);
+        if (res.status >= 400) throw new Error(`status ${res.status}`);
+      });
+      assert.ok(state.failed, "injected failure was never triggered");
+
+      restoreS3();
+      restoreS3 = undefined;
+      assert.deepEqual(await listObjectsWithPrefix(resourceKey), [], "renamed files left behind");
+      await assertNoNewTmpFiles(tmpBefore);
+    });
+
+    it("a failing rename restores an overwritten attachment", async () => {
+      const resourceHref = await createParty();
+      const resourceKey = resourceHref.split("/").pop();
+      const existingKey = uuidv4();
+      await uploadFilesAndCheck(httpClient, [
+        { remotefileName: "keep.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: existingKey, resourceHref },
+      ]);
+      const tmpBefore = new Set(await listTmpObjects());
+
+      const state = { failed: false };
+      restoreS3 = interceptS3(failRenameOf("-other.png", state));
+
+      await assert.rejects(async () => {
+        const res = await doPutFiles(httpClient, type, [
+          // overwrite of the existing attachment (same key) with other content
+          { remotefileName: "keep.png", localFilename: "test/images/avatar-black.png", attachmentKey: existingKey, resourceHref },
+          { remotefileName: "other.png", localFilename: "test/images/avatar-blue.png", attachmentKey: uuidv4(), resourceHref },
+        ]);
+        if (res.status >= 400) throw new Error(`status ${res.status}`);
+      });
+      assert.ok(state.failed, "injected failure was never triggered");
+
+      restoreS3();
+      restoreS3 = undefined;
+      const downloaded = await doGetStream(httpClient, `${resourceHref}/attachments/keep.png`);
+      await checkStreamEqual(downloaded, fs.createReadStream("test/images/orange-boy-icon.png"));
+      assert.deepEqual(await listObjectsWithPrefix(resourceKey), [`${resourceKey}-keep.png`]);
+      await assertNoNewTmpFiles(tmpBefore);
+    });
+
+    it("a failing copy removes the tmp copies that succeeded", async () => {
+      const sourceHref = await createParty();
+      await uploadFilesAndCheck(httpClient, [
+        { remotefileName: "src1.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: uuidv4(), resourceHref: sourceHref },
+        { remotefileName: "src2.png", localFilename: "test/images/avatar-black.png", attachmentKey: uuidv4(), resourceHref: sourceHref },
+      ]);
+      const targetHref = await createParty();
+      const tmpBefore = new Set(await listTmpObjects());
+
+      let failed = false;
+      restoreS3 = interceptS3(async (command) => {
+        const key = String(commandKey(command));
+        if (command.constructor.name === "CopyObjectCommand" && key.endsWith("-src2.png.tmp") && !failed) {
+          // let the copy of src1 finish first
+          await new Promise((r) => setTimeout(r, 300));
+          failed = true;
+          throw new Error("injected copy failure");
+        }
+      });
+
+      const res = await httpClient.post({
+        path: `${type}/attachments/copy`,
+        body: createUploadBody([
+          { attachmentKey: uuidv4(), resourceHref: targetHref, urlToCopy: `${sourceHref}/attachments/src1.png` },
+          { attachmentKey: uuidv4(), resourceHref: targetHref, urlToCopy: `${sourceHref}/attachments/src2.png` },
+        ]),
+      });
+      assert.ok(failed, "injected failure was never triggered");
+      assert.equal(res.status, 500);
+
+      restoreS3();
+      restoreS3 = undefined;
+      await assertNoNewTmpFiles(tmpBefore);
+      assert.deepEqual(await listObjectsWithPrefix(targetHref.split("/").pop()), []);
+    });
+
     it("upload + copy in one request where the last one fails leaves no tmp files", async () => {
       const body = { type: "person", name: "test user", status: "active" };
       const [resourceKey, key1, key2, key3, key4] = Array.from({ length: 5 }, () => uuidv4());
@@ -1331,12 +1443,116 @@ exports = module.exports = function (httpClient, type) {
     });
 
   });
+
+  describe("download errors", function () {
+    this.timeout(15000);
+    /** @type {undefined | (() => void)} */
+    let restoreS3;
+    afterEach(() => {
+      restoreS3?.();
+      restoreS3 = undefined;
+    });
+
+    async function createPartyWithAttachment(filename) {
+      const resourceHref = `${type}/${uuidv4()}`;
+      const res = await httpClient.put({
+        path: resourceHref,
+        body: { type: "person", name: "test user", status: "active" },
+      });
+      assert.equal(res.status, 201);
+      await uploadFilesAndCheck(httpClient, [
+        { remotefileName: filename, localFilename: "test/images/orange-boy-icon.png", attachmentKey: uuidv4(), resourceHref },
+      ]);
+      return resourceHref;
+    }
+
+    /**
+     * Replaces the body of the next S3 GetObject response by a stream that sends one chunk and
+     * then never ends by itself: afterFirstChunk decides what happens next.
+     * @param {(body: Readable) => void} afterFirstChunk
+     * @returns {{ body?: Readable }}
+     */
+    function replaceDownloadBody(afterFirstChunk) {
+      /** @type {{ body?: Readable }} */
+      const state = {};
+      restoreS3 = interceptS3(
+        () => {},
+        (command, response) => {
+          if (command.constructor.name !== "GetObjectCommand" || state.body) return response;
+          response.Body?.destroy?.(); // the real body is not used
+          const body = new Readable({ read() {} });
+          body.push(Buffer.alloc(64 * 1024, 0x42));
+          state.body = body;
+          afterFirstChunk(body);
+          return { ...response, Body: body };
+        }
+      );
+      return state;
+    }
+
+    it("an S3 read error during a download is logged as a server error", async () => {
+      const resourceHref = await createPartyWithAttachment("broken.png");
+      const state = replaceDownloadBody((body) =>
+        setTimeout(() => body.destroy(new Error("injected S3 read failure")), 200)
+      );
+
+      let reqId;
+      const { error, failed, logs } = await captureServerErrorLogs(async () => {
+        const res = await httpClient.get({ path: `${resourceHref}/attachments/broken.png`, streaming: true });
+        assert.equal(res.status, 200);
+        reqId = res.headers["vsko-req-id"];
+        try {
+          await getStreamAsBuffer(res.body);
+        } finally {
+          // the server destroys the connection before it logs the error
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      });
+      assert.ok(state.body, "S3 response body was never replaced");
+      assert.ok(failed, "download should not succeed");
+      assert.equal(error?.code, "streaming.body.read.failed", `unexpected error: ${error?.message ?? error}`);
+      assert.ok(reqId, "missing vsko-req-id header");
+      assertErrorInServerLogs(logs, reqId, 500, "download.failed");
+    });
+
+    it("a client abort during a download is not logged as a server error", async () => {
+      const resourceHref = await createPartyWithAttachment("aborted.png");
+      // the S3 body stays open: the download is still running when the client aborts
+      const state = replaceDownloadBody(() => {});
+
+      let reqId;
+      const { logs } = await captureServerErrorLogs(async () => {
+        await new Promise((resolve, reject) => {
+          const req = http.get(
+            new URL(`${resourceHref}/attachments/aborted.png`, "http://localhost:5000"),
+            (res) => {
+              reqId = res.headers["vsko-req-id"];
+              res.once("data", () => {
+                req.destroy(); // client abort
+                resolve();
+              });
+            }
+          );
+          req.on("error", (err) => (reqId ? resolve() : reject(err)));
+        });
+        // give the server time to notice the abort and finish the request
+        await new Promise((r) => setTimeout(r, 500));
+      });
+
+      assert.ok(state.body, "S3 response body was never replaced");
+      assert.ok(state.body.destroyed, "server did not stop reading from S3 after the client abort");
+      assert.ok(reqId, "missing vsko-req-id header");
+      const errorLogs = logs.filter(
+        (l) => l.includes(reqId) && /Error in streaming request|download\.failed|status: 500/.test(l)
+      );
+      assert.deepEqual(errorLogs, [], "client abort logged as server error");
+    });
+  });
 };
 
 
 // TODO: check if mimetype is set as expected
 
-// No testcase for customRouteForPreSignedUpload provided yet as it is not used
 // TODO : test security??
 
 // TODO : Define resource with S3 and file storage to test both

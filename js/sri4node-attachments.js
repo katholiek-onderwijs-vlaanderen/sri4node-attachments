@@ -1,7 +1,6 @@
 const pEvent = require("p-event");
 const S3 = require("@aws-sdk/client-s3");
 const { Upload } = require("@aws-sdk/lib-storage");
-const S3PresignedPost = require("@aws-sdk/s3-presigned-post");
 const mime = require("mime-types");
 const { randomUUID: uuidv4 } = require("crypto");
 const { pipeline } = require("stream");
@@ -132,7 +131,7 @@ function getSafeFilename(filename) {
  *        description: string;
  *      }> } TGetAttJsonFun
  * @typedef { ( tx:any, sriRequest: TSriRequest, key: string, filename: string ) => Promise<void> } TCheckDownloadFun
- * @typedef { ( tx:any, sriRequest: TSriRequest) => Promise<[[string, string]]> } TGetCacheHeadersFun
+ * @typedef { ( tx:any, sriRequest: TSriRequest) => Promise<Array<[string, string]>> } TGetCacheHeadersFun
  * @typedef { (tx: IDatabase, sriRequest: TSriRequest, resourceKey: string, attachmentKey: string) => Promise<string> } TGetFileNameHandlerFun
  * @typedef { (tx: IDatabase, sriRequest: TSriRequest, resourceKey: string, attachmentKey: string) => Promise<void> } TAfterHandlerFun
  * @typedef { (href: string) => string } TGetResourceForCopyFun
@@ -147,7 +146,8 @@ function getSafeFilename(filename) {
  *      getResourceForCopy?: TGetResourceForCopyFun,
  *    ) => TCustomRoute,
  *    customRouteForDownload: (
- *      checkDownload?: TCheckDownloadFun
+ *      checkDownload?: TCheckDownloadFun,
+ *      getCacheHeaders?: TGetCacheHeadersFun
  *    ) => TCustomRoute,
  *    customRouteForDelete: (
  *      getFileNameHandler: TGetFileNameHandlerFun,
@@ -363,6 +363,11 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       // const stream = response.Body.transformToWebStream();
       const stream = response.Body;
 
+      // pipeline destroys all streams on any failure, so outstream.destroyed alone does not
+      // tell which side failed: remember whether the client side closed before the S3 source
+      // emitted an error (a failing source errors first, outstream is closed afterwards)
+      let outstreamClosed = false;
+      let sourceFailed = false;
       // Use pipeline with proper cleanup - it handles most edge cases automatically
       try {
         // the response already carries several 'close' listeners (express, compression,
@@ -370,14 +375,30 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         if (typeof outstream.getMaxListeners === "function") {
           outstream.setMaxListeners(Math.max(outstream.getMaxListeners(), 20));
         }
-        // @ts-ignore - AWS SDK stream types
-        await pipelineAsync(stream, outstream);
+        const onOutstreamClose = () => {
+          outstreamClosed = true;
+        };
+        const onSourceError = () => {
+          if (!outstreamClosed) {
+            sourceFailed = true;
+          }
+        };
+        outstream.once("close", onOutstreamClose);
+        stream.once("error", onSourceError);
+        try {
+          // @ts-ignore - AWS SDK stream types
+          await pipelineAsync(stream, outstream);
+        } finally {
+          outstream.off("close", onOutstreamClose);
+          stream.off("error", onSourceError);
+          stream.on("error", () => {}); // late errors of the destroyed source are irrelevant
+        }
         debug("[downloadFromS3] Finished download of file.");
       } catch (err) {
-        // Check if it's a client disconnect (outstream closed)
-        if (outstream.destroyed) {
+        // client disconnect: the client side closed before the S3 source failed
+        if (outstreamClosed && !sourceFailed) {
           debug("[downloadFromS3] stream closed prematurely");
-          throw new Error("499 partial content");
+          throw Object.assign(new Error("client aborted the download"), { clientAborted: true });
         }
 
         const msg = "[downloadFromS3] error during stream pipeline";
@@ -388,6 +409,9 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         throw new Error(`500 ${msg}`);
       }
     } catch (err) {
+      if (err?.clientAborted) {
+        throw err; // not a server error, no error logging
+      }
       errorReq({
         msg: "[downloadFromS3] the download failed with error",
         error: errorToLogObject(err),
@@ -533,20 +557,72 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
-   * Rename a file on S3
+   * Copy a file on S3, keeping its metadata (used for backups and restores).
    *
-   * @param {TMultiPartSingleBodyForFileUploadsWithFileObj} fileWithJson
-   * @returns {Promise<void>}
+   * @param {string} destinationFileName
+   * @param {string} sourceFileName
    */
-  async function renameFile(fileWithJson) {
-    const { fileObj } = fileWithJson;
-    const s3filename = getS3FileNameByMultiPartBody(fileWithJson);
-    const { tmpFileName } = fileObj;
-    debug(`Rename ${tmpFileName} to ${s3filename}`);
+  async function copyFileKeepMetadata(destinationFileName, sourceFileName) {
+    const awss3 = getAWSS3Client();
+    return await awss3.send(
+      new S3.CopyObjectCommand({
+        Bucket: fullPluginConfig.s3bucket,
+        Key: destinationFileName,
+        ACL: "bucket-owner-full-control",
+        CopySource: encodeURI(`/${fullPluginConfig.s3bucket}/${sourceFileName}`),
+        MetadataDirective: "COPY",
+        TaggingDirective: "COPY",
+      })
+    );
+  }
 
-    await copyFile(s3filename, tmpFileName, fileWithJson.attachment.key);
+  /**
+   * Checks if a file exists on S3. Unlike getFileMeta, errors other than 'not found' are thrown.
+   *
+   * @param {string} s3filename
+   * @returns {Promise<boolean>}
+   */
+  async function existsOnS3(s3filename) {
+    try {
+      await headFromS3(s3filename);
+      return true;
+    } catch (err) {
+      if (err?.$metadata?.httpStatusCode === 404 || err?.name === "NotFound") {
+        return false;
+      }
+      throw err;
+    }
+  }
 
-    await deleteFromS3([tmpFileName]);
+  /**
+   * Deletes files from S3, only logging a failure (used during cleanup).
+   *
+   * @param {string[]} filenames
+   * @param {string} msg
+   */
+  async function deleteFromS3Logged(filenames, msg) {
+    if (!filenames.length) {
+      return;
+    }
+    try {
+      await deleteFromS3(filenames);
+    } catch (err) {
+      error({ msg, filenames, error: errorToLogObject(err) });
+    }
+  }
+
+  /**
+   * Waits for all promises to settle (so nothing is still running afterwards) and throws the
+   * first rejection reason, if any.
+   *
+   * @param {Array<Promise<any>>} promises
+   */
+  async function settleAllOrThrow(promises) {
+    const results = await Promise.allSettled(promises);
+    const failed = results.find((r) => r.status === "rejected");
+    if (failed) {
+      throw /** @type {PromiseRejectedResult} */ (failed).reason;
+    }
   }
 
   /**
@@ -600,6 +676,18 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
         }
         // Retry with the original filename if there's a difference
         await handleFileDownload(tx, sriRequest, stream, true);
+      } else if (err?.clientAborted) {
+        // 499: sri4node treats this as a client abort (debug logging only) instead of an error
+        throw new sriRequest.SriError({
+          status: 499,
+          errors: [
+            {
+              code: "download.aborted",
+              type: "ERROR",
+              message: "client aborted the download",
+            },
+          ],
+        });
       } else {
         throw new sriRequest.SriError({
           status: 500,
@@ -647,23 +735,6 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     }
   }
 
-  // /**
-  //  *
-  //  * @returns {Promise<S3PresignedPost.PresignedPost>}
-  //  */
-  // async function getPreSigned() {
-  //   debug("getting presigned post for s3");
-
-  //   const awss3 = getAWSS3Client();
-
-  //   return await S3PresignedPost.createPresignedPost(awss3, {
-  //     Bucket: fullPluginConfig.s3bucket,
-  //     Conditions: [["starts-with", "$key", "tmp"]],
-  //     // some kind of random tmp key?
-  //     Key: `tmp${Math.round(Math.random() * 9999999)}`,
-  //   });
-  // }
-
   /**
    * Calls the security server to verify if a specified ability is allowed on the specified attachments.
    * If the request is allowed by security, this function will return true. In case it is not allowed,
@@ -692,7 +763,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     if (fullPluginConfig.security.abilityAppend) {
       attAbility += fullPluginConfig.security.abilityAppend;
     }
-    const elementsToCheck = [...resources].map((resource) => ({permalink: resource}));
+    const elementsToCheck = [...resources].map((resource) => ({ permalink: resource }));
     await security.check(tx, sriRequest, elementsToCheck, attAbility);
   }
 
@@ -790,7 +861,16 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
       )
     );
 
-    await Promise.all(copyPromises);
+    const copyResults = await Promise.allSettled(copyPromises);
+    const failedCopy = copyResults.find((r) => r.status === "rejected");
+    if (failedCopy) {
+      // remove the tmp copies that did succeed, nobody else knows about them
+      const copiedTmpFiles = toCopyWithFileObjFiltered
+        .filter((_body, index) => copyResults[index].status === "fulfilled")
+        .map((body) => body.fileObj.tmpFileName);
+      await deleteFromS3Logged(copiedTmpFiles, "[copyAttachments] cleanup of tmp copies failed");
+      throw /** @type {PromiseRejectedResult} */ (failedCopy).reason;
+    }
 
     return toCopyWithFileObjFiltered;
   }
@@ -1276,7 +1356,81 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * @returns
    */
   async function renameAttachmentsToRealNames(attachmentsWithFileObj) {
-    return Promise.all(attachmentsWithFileObj.map((file) => renameFile(file)));
+    const renames = attachmentsWithFileObj.map((file) => ({
+      target: getS3FileNameByMultiPartBody(file),
+      tmpFileName: file.fileObj.tmpFileName,
+      filename: file.fileObj.filename,
+      attachmentKey: file.attachment.key,
+      /** @type {string | undefined} */
+      backupFileName: undefined,
+      copied: false,
+    }));
+
+    try {
+      // 1. back up existing files that will be overwritten, so they can be restored on failure
+      await settleAllOrThrow(
+        renames.map(async (r) => {
+          if (await existsOnS3(r.target)) {
+            const backupFileName = getTmpFilename(`backup-${r.filename}`);
+            await copyFileKeepMetadata(backupFileName, r.target);
+            r.backupFileName = backupFileName;
+          }
+        })
+      );
+      // 2. copy the tmp files to their real names (tmp files are kept until all succeeded)
+      await settleAllOrThrow(
+        renames.map(async (r) => {
+          debug(`Rename ${r.tmpFileName} to ${r.target}`);
+          await copyFile(r.target, r.tmpFileName, r.attachmentKey);
+          r.copied = true;
+        })
+      );
+    } catch (err) {
+      await undoRenames(renames);
+      throw err; // the tmp files are removed by handleErrorDuringUploadOrCopy
+    }
+
+    // 3. everything is in place: remove tmp files and backups
+    await deleteFromS3Logged(
+      [
+        ...renames.map((r) => r.tmpFileName),
+        ...renames.filter((r) => r.backupFileName).map((r) => r.backupFileName),
+      ],
+      "[renameAttachmentsToRealNames] cleanup of tmp files after rename failed"
+    );
+  }
+
+  /**
+   * Undoes the renames that already happened: newly created files are removed, overwritten
+   * files are restored from their backup. Backups are removed afterwards (unless the restore
+   * failed, then the backup is kept and logged so it can be restored manually).
+   *
+   * @param {Array<{ target: string, backupFileName?: string, copied: boolean }>} renames
+   */
+  async function undoRenames(renames) {
+    const toDelete = renames.filter((r) => r.copied && !r.backupFileName).map((r) => r.target);
+    const backupsToRemove = renames.filter((r) => r.backupFileName && !r.copied).map((r) => r.backupFileName);
+
+    await Promise.all(
+      renames
+        .filter((r) => r.copied && r.backupFileName)
+        .map(async (r) => {
+          try {
+            await copyFileKeepMetadata(r.target, r.backupFileName);
+            backupsToRemove.push(r.backupFileName);
+          } catch (err) {
+            error({
+              msg: `[undoRenames] restoring ${r.target} failed, the original file is kept as ${r.backupFileName}`,
+              error: errorToLogObject(err),
+            });
+          }
+        })
+    );
+
+    await deleteFromS3Logged(
+      [...toDelete, ...backupsToRemove],
+      "[undoRenames] cleanup after failed rename failed"
+    );
   }
 
   /**
@@ -1632,47 +1786,6 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     };
   }
 
-  // /**
-  //  * A function that will generate a json object that can be used in
-  //  * sriConfig.resources.*.customRoutes in order to add a GET
-  //  * /resource/attachments/prsegignedupload route.
-  //  * This is something specific to upload a file directly to S3 or something
-  //  * (without proxying through the api server) by requesting some kind of token first
-  //  * and then using that to be allowed to upload something directly to S3.
-  //  *
-  //  * [ Currently not used ]
-  //  *
-  //  * @returns {TCustomRoute}
-  //  */
-  // function customRouteForPreSignedUpload() {
-  //   return {
-  //     routePostfix: "/attachments/presigned",
-  //     httpMethods: ["GET"],
-  //     readOnly: true,
-  //     /**
-  //      * @type { TNonStreamingCustomRoute['beforeHandler'] }
-  //      */
-  //     beforeHandler: async (
-  //       _tx,
-  //       _sriRequest,
-  //       _customMapping,
-  //       _internalUtils
-  //     ) => {
-  //       // await checkSecurity(tx, sriRequest, null, 'create');
-  //     },
-  //     /**
-  //      * @type { TNonStreamingCustomRoute['handler'] }
-  //      */
-  //     handler: async (_tx, _sriRequest, _customMapping, _internalUtils) => {
-  //       /// do the presigned request to s3
-  //       const json = await getPreSigned();
-  //       return {
-  //         body: json,
-  //         status: 200,
-  //       };
-  //     },
-  //   };
-  // }
 
   /**
    * A function that will generate a json object that can be used in
@@ -1682,8 +1795,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
    * Any filename is accepted (with or without extension), except a uuid-like string
    * (36 hex digits and dashes, case-insensitive because express routing is case-insensitive
    * by default), because that path is handled by customRouteForGet.
-   * @param { TCheckDownloadFun } checkDownload
-   * @param { TGetCacheHeadersFun } getCacheHeaders
+   * @param { TCheckDownloadFun } [checkDownload]
+   * @param { TGetCacheHeadersFun } [getCacheHeaders]
    * @returns {TCustomRoute}
    */
   function customRouteForDownload(checkDownload, getCacheHeaders) {
