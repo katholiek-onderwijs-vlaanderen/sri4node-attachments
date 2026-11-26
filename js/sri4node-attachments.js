@@ -58,6 +58,24 @@ const pipelineAsync = promisify(pipeline);
  * } } TFileObj
  */
 
+/** S3 DeleteObjects accepts at most 1000 keys per request */
+const S3_DELETE_MAX_KEYS = 1000;
+
+/**
+ * Splits an array into chunks of at most size elements.
+ * @template T
+ * @param {Array<T>} arr
+ * @param {number} size
+ * @returns {Array<Array<T>>}
+ */
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let offset = 0; offset < arr.length; offset += size) {
+    chunks.push(arr.slice(offset, offset + size));
+  }
+  return chunks;
+}
+
 /**
  * @param {string} href for example /things/123
  * @returns {string} the last part of the href, which is the key
@@ -437,6 +455,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
+   * Deletes files from S3, in batches of at most S3_DELETE_MAX_KEYS (the DeleteObjects limit).
    *
    * @param {string[]} filenames
    * @returns {Promise<void>}
@@ -444,15 +463,25 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   async function deleteFromS3(filenames) {
     const awss3 = getAWSS3Client();
 
-    const objects = filenames.map((e) => ({ Key: e }));
-    const params = {
-      Bucket: fullPluginConfig.s3bucket,
-      Delete: {
-        Objects: objects,
-      },
-    };
-    const result = await awss3.send(new S3.DeleteObjectsCommand(params));
-    debug(`[deleteFromS3] deleted ${result.Deleted?.length ?? 0} object(s)`);
+    for (const batch of chunkArray(filenames, S3_DELETE_MAX_KEYS)) {
+      const params = {
+        Bucket: fullPluginConfig.s3bucket,
+        Delete: {
+          Objects: batch.map((e) => ({ Key: e })),
+        },
+      };
+      // eslint-disable-next-line no-await-in-loop
+      const result = await awss3.send(new S3.DeleteObjectsCommand(params));
+      debug(`[deleteFromS3] deleted ${result.Deleted?.length ?? 0} object(s)`);
+      // DeleteObjects does not fail when single keys could not be deleted: log them, otherwise
+      // the files are left behind unnoticed
+      if (result.Errors?.length) {
+        error({
+          msg: `[deleteFromS3] ${result.Errors.length} object(s) could not be deleted and are left behind`,
+          errors: result.Errors.map(({ Key, Code, Message }) => ({ Key, Code, Message })),
+        });
+      }
+    }
   }
 
   /**

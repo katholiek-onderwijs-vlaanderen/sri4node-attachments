@@ -5,6 +5,8 @@ const rewire = require("rewire");
 
 const sri4nodeAttachments = rewire("../js/sri4node-attachments.js");
 const getSafeFilename = sri4nodeAttachments.__get__("getSafeFilename");
+const chunkArray = sri4nodeAttachments.__get__("chunkArray");
+const S3_DELETE_MAX_KEYS = sri4nodeAttachments.__get__("S3_DELETE_MAX_KEYS");
 
 // AWS S3 guidelines: https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html
 describe("getSafeFilename", () => {
@@ -36,5 +38,24 @@ describe("getSafeFilename", () => {
     it(c.description, () => {
       assert.equal(getSafeFilename(c.filename), c.expected);
     });
+  });
+});
+
+describe("chunkArray (used to stay within the S3 DeleteObjects limit)", () => {
+  it("returns no chunks for an empty array", () => {
+    assert.deepEqual(chunkArray([], S3_DELETE_MAX_KEYS), []);
+  });
+
+  it("splits 1002 keys into chunks of at most 1000 keys", () => {
+    const keys = Array.from({ length: 1002 }, (_, i) => `key${i}`);
+    const chunks = chunkArray(keys, S3_DELETE_MAX_KEYS);
+    assert.equal(S3_DELETE_MAX_KEYS, 1000);
+    assert.deepEqual(chunks.map((c) => c.length), [1000, 2]);
+    assert.deepEqual(chunks.flat(), keys);
+  });
+
+  it("keeps exactly 1000 keys in one chunk", () => {
+    const keys = Array.from({ length: 1000 }, (_, i) => `key${i}`);
+    assert.deepEqual(chunkArray(keys, S3_DELETE_MAX_KEYS).map((c) => c.length), [1000]);
   });
 });

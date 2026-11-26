@@ -1577,6 +1577,47 @@ exports = module.exports = function (httpClient, type) {
       }
     });
 
+    it("objects that S3 could not delete are logged", async () => {
+      const resourceHref = await createParty();
+      const resourceKey = resourceHref.split("/").pop();
+      const attachmentKey = uuidv4();
+      await uploadFilesAndCheck(httpClient, [
+        { remotefileName: "undeletable.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey, resourceHref },
+      ]);
+
+      // DeleteObjects does not fail when single keys can not be deleted, it reports them in Errors
+      restoreS3 = interceptS3(
+        () => {},
+        (command, response) => {
+          if (command.constructor.name !== "DeleteObjectsCommand") return response;
+          return {
+            ...response,
+            Deleted: [],
+            Errors: command.input.Delete.Objects.map(({ Key }) => ({
+              Key,
+              Code: "AccessDenied",
+              Message: "injected delete failure",
+            })),
+          };
+        }
+      );
+
+      const { logs } = await captureServerErrorLogs(async () => {
+        const res = await httpClient.delete({ path: `${resourceHref}/attachments/${attachmentKey}` });
+        assert.equal(res.status, 204);
+      });
+      restoreS3();
+      restoreS3 = undefined;
+
+      const leftBehindLogs = logs.filter(
+        (l) =>
+          l.includes("could not be deleted") &&
+          l.includes(`${resourceKey}-undeletable.png`) &&
+          l.includes("AccessDenied")
+      );
+      assert.equal(leftBehindLogs.length, 1, `expected one log of the left behind object, got:\n${logs.join("")}`);
+    });
+
   });
 
   describe("download errors", function () {
