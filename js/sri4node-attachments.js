@@ -1361,8 +1361,33 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
   }
 
   /**
+   * Takes a transaction-scoped PostgreSQL advisory lock per S3 object. The locks are held until
+   * the transaction of the request ends, so the existence check/backup/promotion/rollback
+   * sequence of requests (also on other server instances, they share the database) that write
+   * the same S3 objects is serialized: another request can only check and promote its files
+   * after this request has rolled back its S3 changes, or after its database changes have been
+   * committed.
+   * Locks are taken in sorted order to avoid deadlocks between requests.
+   *
+   * @param {IDatabase} tx
+   * @param {string[]} s3filenames
+   */
+  async function lockS3Objects(tx, s3filenames) {
+    const keys = [...new Set(s3filenames)]
+      .map((f) => `${fullPluginConfig.s3bucket}/${f}`)
+      .sort();
+    for (const key of keys) {
+      await tx.any(
+        "SELECT pg_advisory_xact_lock(hashtext('sri4node-attachments'), hashtext($1))",
+        [key]
+      );
+    }
+  }
+
+  /**
    * This function will rename the uploaded / copied attachments from
    * their temporarily filenames to their real filenames.
+   * The caller must hold the locks on the real filenames (see lockS3Objects).
    * @param {*} attachmentsWithFileObj
    * @returns
    */
@@ -1657,6 +1682,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
             ...attachmentsWithoutFileOrCopy,
           ];
 
+          // lock first, so the existence check and the rename are not interleaved with
+          // other requests writing the same files
+          await lockS3Objects(
+            tx,
+            allAttachmentsWithFileObj.map(getS3FileNameByMultiPartBody)
+          );
           await checkAttachmentsFileExistence(
             allAttachmentsWithFileObj,
             sriRequest
@@ -1760,6 +1791,12 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
             getResourceForCopy
           );
 
+          // lock first, so the existence check and the rename are not interleaved with
+          // other requests writing the same files
+          await lockS3Objects(
+            tx,
+            copiedAttachmentsWithFileObj.map(getS3FileNameByMultiPartBody)
+          );
           await checkAttachmentsFileExistence(
             copiedAttachmentsWithFileObj,
             sriRequest

@@ -1341,6 +1341,100 @@ exports = module.exports = function (httpClient, type) {
       await assertNoNewTmpFiles(tmpBefore);
     });
 
+    it("a rollback does not overwrite a concurrent upload to the same file", async () => {
+      const resourceHref = await createParty();
+      const resourceKey = resourceHref.split("/").pop();
+      const existingKey = uuidv4();
+      await uploadFilesAndCheck(httpClient, [
+        { remotefileName: "shared.png", localFilename: "test/images/orange-boy-icon.png", attachmentKey: existingKey, resourceHref },
+      ]);
+      const tmpBefore = new Set(await listTmpObjects());
+
+      // request A: overwrites shared.png, but the rename of other.png fails after a delay
+      let failed = false;
+      restoreS3 = interceptS3(async (command) => {
+        const isRename =
+          command.constructor.name === "CopyObjectCommand" &&
+          String(command.input?.CopySource ?? "").endsWith(".tmp") &&
+          !String(commandKey(command)).endsWith(".tmp");
+        if (isRename && String(commandKey(command)).endsWith("-other.png") && !failed) {
+          failed = true;
+          await new Promise((r) => setTimeout(r, 1000));
+          throw new Error("injected rename failure");
+        }
+      });
+      const requestA = (async () => {
+        const res = await doPutFiles(httpClient, type, [
+          { remotefileName: "shared.png", localFilename: "test/images/avatar-black.png", attachmentKey: existingKey, resourceHref },
+          { remotefileName: "other.png", localFilename: "test/images/avatar-blue.png", attachmentKey: uuidv4(), resourceHref },
+        ]);
+        if (res.status >= 400) throw new Error(`status ${res.status}`);
+      })();
+      requestA.catch(() => {});
+
+      // request B: overwrites shared.png while A is still busy (A already promoted shared.png).
+      // A separate client is needed: one client uses one connection, so B would wait for A.
+      await new Promise((r) => setTimeout(r, 400));
+      const otherHttpClient = require("./httpClient.js").httpClientFactory("http://localhost:5000");
+      const responseB = await doPutFiles(otherHttpClient, type, [
+        { remotefileName: "shared.png", localFilename: "test/images/little-boy-white.png", attachmentKey: existingKey, resourceHref },
+      ]);
+      assert.equal(responseB.status, 200);
+      await assert.rejects(requestA);
+      assert.ok(failed, "injected failure was never triggered");
+
+      restoreS3();
+      restoreS3 = undefined;
+      // B succeeded, so its content must survive the rollback of A
+      const downloaded = await doGetStream(httpClient, `${resourceHref}/attachments/shared.png`);
+      await checkStreamEqual(downloaded, fs.createReadStream("test/images/little-boy-white.png"));
+      assert.deepEqual(await listObjectsWithPrefix(resourceKey), [`${resourceKey}-shared.png`]);
+      await assertNoNewTmpFiles(tmpBefore);
+    });
+
+    it("concurrent uploads of a new file with the same name but another key: only one succeeds", async () => {
+      const resourceHref = await createParty();
+      const resourceKey = resourceHref.split("/").pop();
+      const tmpBefore = new Set(await listTmpObjects());
+
+      // request A: the rename of new.png is slow, so A is still busy when B checks existence
+      let delayed = false;
+      restoreS3 = interceptS3(async (command) => {
+        const isRename =
+          command.constructor.name === "CopyObjectCommand" &&
+          String(command.input?.CopySource ?? "").endsWith(".tmp") &&
+          !String(commandKey(command)).endsWith(".tmp");
+        if (isRename && String(commandKey(command)).endsWith("-new.png") && !delayed) {
+          delayed = true;
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      });
+      const requestA = doPutFiles(httpClient, type, [
+        { remotefileName: "new.png", localFilename: "test/images/avatar-black.png", attachmentKey: uuidv4(), resourceHref },
+      ]);
+
+      // request B: same filename, other key (separate client, otherwise B waits for A)
+      await new Promise((r) => setTimeout(r, 400));
+      const otherHttpClient = require("./httpClient.js").httpClientFactory("http://localhost:5000");
+      await expectRequestError(
+        () =>
+          doPutFiles(otherHttpClient, type, [
+            { remotefileName: "new.png", localFilename: "test/images/little-boy-white.png", attachmentKey: uuidv4(), resourceHref },
+          ]),
+        409,
+        "file.already.exists"
+      );
+      assert.equal((await requestA).status, 200);
+      assert.ok(delayed, "rename of request A was never delayed");
+
+      restoreS3();
+      restoreS3 = undefined;
+      const downloaded = await doGetStream(httpClient, `${resourceHref}/attachments/new.png`);
+      await checkStreamEqual(downloaded, fs.createReadStream("test/images/avatar-black.png"));
+      assert.deepEqual(await listObjectsWithPrefix(resourceKey), [`${resourceKey}-new.png`]);
+      await assertNoNewTmpFiles(tmpBefore);
+    });
+
     it("a failing copy removes the tmp copies that succeeded", async () => {
       const sourceHref = await createParty();
       await uploadFilesAndCheck(httpClient, [

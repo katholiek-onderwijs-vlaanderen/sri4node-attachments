@@ -388,6 +388,7 @@ async function addAttachments(tx, sriReq, elements) {
 - `/resource/guid/attachments/` can be seen as a batch, as multiple attachments (BODY json array) and data files can be uploaded at once.
 - the `routePostfix` for the download and delete are regexed to only fire on filenames. You are free to add extra routes like `/:key/attachments/:attachmentkey` if you want to handle showing a json file on that route for an attachment.
 - you can throw errors in your afterUpload function. This will rollback all filechanges in the batch.
+- uploads and copies that write the same S3 files are serialized with PostgreSQL transaction-scoped advisory locks (`pg_advisory_xact_lock`), held until the transaction of the request ends. This way the rollback of a failing request can never delete or overwrite the files of a concurrent request, and two concurrent requests can not both create a file with the same name (but another key), also across server instances (they share the database). A request writing a file that is being written by another request waits until that request is finished.
 
 ### TODO
 
