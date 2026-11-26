@@ -662,6 +662,9 @@ async function listObjectsWithPrefix(prefix) {
  * @param {string} [opts.method] same method as doPutFiles uses
  * @param {number} [opts.bytesBeforeAbort] > 5MB so lib-storage actually starts uploading
  * @param {number} [opts.waitBeforeAbortMs]
+ * @param {Array<{ name: string, size: number }>} [opts.leadingFiles] complete file parts sent
+ *    before the incomplete one
+ * @param {number} [opts.waitBeforePartialMs] wait between the leading files and the incomplete part
  * @returns {Promise<void>}
  */
 function sendPartialMultipartAndAbort({
@@ -671,25 +674,29 @@ function sendPartialMultipartAndAbort({
   method = "POST",
   bytesBeforeAbort = 6 * 1024 * 1024,
   waitBeforeAbortMs = 500,
+  leadingFiles = [],
+  waitBeforePartialMs = 0,
 }) {
   const boundary = `----test${Date.now()}`;
   const fileName = "abort.png";
-  // same shape as createUploadBody / doPutFiles: verify against your existing helper!
-  const bodyJson = JSON.stringify([
-    {
-      file: fileName,
+  const bodyJson = JSON.stringify(
+    [...leadingFiles.map((f) => f.name), fileName].map((file) => ({
+      file,
       attachment: { key: require("crypto").randomUUID() },
       resource: { href: resourceHref },
-    },
-  ]);
+    }))
+  );
+
+  // every part ends with the delimiter of the next one ("\r\n--boundary"), so busboy knows
+  // immediately that a (leading) file part is complete
+  const filePartHeader = (name) =>
+    `\r\nContent-Disposition: form-data; name="data"; filename="${name}"\r\n` +
+    `Content-Type: image/png\r\n\r\n`;
 
   const head =
     `--${boundary}\r\n` +
     `Content-Disposition: form-data; name="body"\r\n\r\n` +
-    `${bodyJson}\r\n` +
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="data"; filename="${fileName}"\r\n` +
-    `Content-Type: image/png\r\n\r\n`;
+    `${bodyJson}\r\n--${boundary}`;
 
   const url = new URL(uploadPath, baseUrl);
 
@@ -710,12 +717,21 @@ function sendPartialMultipartAndAbort({
     });
 
     req.write(head);
-    req.write(Buffer.alloc(bytesBeforeAbort, 0x42)); // incomplete file part, no closing boundary
+    for (const { name, size } of leadingFiles) {
+      req.write(filePartHeader(name));
+      req.write(Buffer.alloc(size, 0x41));
+      req.write(`\r\n--${boundary}`);
+    }
 
     setTimeout(() => {
-      req.destroy(); // client abort -> busboy emits 'error' on the file stream
-      resolve();
-    }, waitBeforeAbortMs);
+      req.write(filePartHeader(fileName));
+      req.write(Buffer.alloc(bytesBeforeAbort, 0x42)); // incomplete file part, no closing boundary
+
+      setTimeout(() => {
+        req.destroy(); // client abort -> busboy emits 'error' on the file stream
+        resolve();
+      }, waitBeforeAbortMs);
+    }, waitBeforePartialMs);
   });
 }
 

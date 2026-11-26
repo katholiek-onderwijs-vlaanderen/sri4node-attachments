@@ -1442,6 +1442,47 @@ exports = module.exports = function (httpClient, type) {
       }
     });
 
+    it("a client abort while draining file parts after a failed tmp upload does not crash the process", async () => {
+      const resourceHref = await createParty();
+      const tmpBefore = new Set(await listTmpObjects());
+      /** @type {Error[]} */
+      const uncaught = [];
+      const onUncaught = (err) => uncaught.push(err);
+      process.on("uncaughtException", onUncaught);
+
+      let failed = false;
+      restoreS3 = interceptS3(async (command) => {
+        if (String(commandKey(command)).endsWith("-first.png.tmp")) {
+          failed = true;
+          throw new Error("injected tmp upload failure");
+        }
+        if (command.constructor.name === "DeleteObjectsCommand") {
+          // keep the cleanup pending while the next file part is drained and the client aborts
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      });
+
+      try {
+        await sendPartialMultipartAndAbort({
+          baseUrl: "http://localhost:5000", // must match the port of the test server / httpClient
+          uploadPath: `/${type.replace(/^\//, "")}/attachments`,
+          resourceHref: `/${resourceHref.replace(/^\//, "")}`,
+          leadingFiles: [{ name: "first.png", size: 1024 }],
+          waitBeforePartialMs: 300,
+          bytesBeforeAbort: 1024 * 1024,
+          waitBeforeAbortMs: 300,
+        });
+        await new Promise((r) => setTimeout(r, 2000));
+        assert.ok(failed, "injected failure was never triggered");
+        assert.deepEqual(uncaught.map((e) => e.message), [], "uncaught stream error");
+        restoreS3();
+        restoreS3 = undefined;
+        await assertNoNewTmpFiles(tmpBefore);
+      } finally {
+        process.off("uncaughtException", onUncaught);
+      }
+    });
+
   });
 
   describe("download errors", function () {

@@ -1130,6 +1130,17 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     inStream?.on("error", onInStreamAbort);
 
     /**
+     * Drains a file stream whose content is not needed (anymore). Busboy destroys the active file
+     * stream with an error when the client aborts (see onInStreamAbort), so attach an error
+     * listener first: an 'error' without listener is an uncaught exception that kills the server.
+     * @param {import('stream').Readable | undefined} fileStream
+     */
+    const discardFileStream = (fileStream) => {
+      fileStream?.on("error", () => {});
+      fileStream?.resume();
+    };
+
+    /**
      *
      * @param {TFileObj} fileObj
      * @returns {Promise<TFileObj>}
@@ -1157,7 +1168,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
           `uploading tmp file ${fileObj.tmpFileName} failed`
         );
         // consume the rest of this part, otherwise busboy never continues / emits 'close'
-        fileObj.file?.resume();
+        discardFileStream(fileObj.file);
         if (!uploadErrorSignalled) {
           uploadErrorSignalled = true;
           rejectOnUploadError(err);
@@ -1218,7 +1229,7 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
     } catch (err) {
       // drain any remaining file parts so the request can finish
       sriRequest.busBoy.removeAllListeners("file");
-      sriRequest.busBoy.on("file", (_name, s) => s.resume());
+      sriRequest.busBoy.on("file", (_name, s) => discardFileStream(s));
 
       // make sure no upload is still running before cleaning up
       await Promise.allSettled(tmpUploads);
