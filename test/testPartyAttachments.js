@@ -1650,6 +1650,30 @@ exports = module.exports = function (httpClient, type) {
       assertErrorInServerLogs(logs, reqId, 500, "download.failed");
     });
 
+    it("a premature close of the S3 source during a download is logged as a server error", async () => {
+      const resourceHref = await createPartyWithAttachment("truncated.png");
+      // the S3 body closes before its end, without emitting an error
+      const state = replaceDownloadBody((body) => setTimeout(() => body.destroy(), 200));
+
+      let reqId;
+      const { error, failed, logs } = await captureServerErrorLogs(async () => {
+        const res = await httpClient.get({ path: `${resourceHref}/attachments/truncated.png`, streaming: true });
+        assert.equal(res.status, 200);
+        reqId = res.headers["vsko-req-id"];
+        try {
+          await getStreamAsBuffer(res.body);
+        } finally {
+          // the server destroys the connection before it logs the error
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      });
+      assert.ok(state.body, "S3 response body was never replaced");
+      assert.ok(failed, "download should not succeed");
+      assert.equal(error?.code, "streaming.body.read.failed", `unexpected error: ${error?.message ?? error}`);
+      assert.ok(reqId, "missing vsko-req-id header");
+      assertErrorInServerLogs(logs, reqId, 500, "download.failed");
+    });
+
     it("a client abort during a download is not logged as a server error", async () => {
       const resourceHref = await createPartyWithAttachment("aborted.png");
       // the S3 body stays open: the download is still running when the client aborts

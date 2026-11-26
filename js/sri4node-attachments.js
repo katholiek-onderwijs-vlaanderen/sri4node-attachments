@@ -366,7 +366,8 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
 
       // pipeline destroys all streams on any failure, so outstream.destroyed alone does not
       // tell which side failed: remember whether the client side closed before the S3 source
-      // emitted an error (a failing source errors first, outstream is closed afterwards).
+      // failed (emitted an error or closed before its end). A failing source fails first,
+      // outstream is closed afterwards.
       // The client can also have disconnected already while the S3 request was pending: then
       // 'close' has fired before the listener below is registered.
       let outstreamClosed = !!(outstream.destroyed || outstream.closed);
@@ -386,14 +387,22 @@ async function sri4nodeAttachmentUtilsFactory(pluginConfig, sri4node) {
             sourceFailed = true;
           }
         };
+        const onSourceClose = () => {
+          // a premature close (before 'end') is an upstream failure as well
+          if (!outstreamClosed && !stream.readableEnded) {
+            sourceFailed = true;
+          }
+        };
         outstream.once("close", onOutstreamClose);
         stream.once("error", onSourceError);
+        stream.once("close", onSourceClose);
         try {
           // @ts-ignore - the promisified pipeline typing does not match TReadableStream outstream
           await pipelineAsync(stream, outstream);
         } finally {
           outstream.off("close", onOutstreamClose);
           stream.off("error", onSourceError);
+          stream.off("close", onSourceClose);
           stream.on("error", () => {}); // late errors of the destroyed source are irrelevant
         }
         debug("[downloadFromS3] Finished download of file.");
